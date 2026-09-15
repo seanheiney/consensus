@@ -367,11 +367,16 @@ profile
       const cur = cfg.profiles?.[preset.name];
       if (!cur) continue;
       const fresh = _mp(preset, statuses);
-      if (fresh && JSON.stringify(fresh.panel) !== JSON.stringify(cur.panel)) {
+      if (!fresh) {
+        delete cfg.profiles![preset.name];
+        if (cfg.profile === preset.name) cfg.profile = undefined;
+        changed.push(`${preset.name}: removed (no connection can seat it now; \`consensus profile create ${preset.name} --preset ${preset.name}\` brings it back)`);
+      } else if (JSON.stringify(fresh.panel) !== JSON.stringify(cur.panel)) {
         cfg.profiles![preset.name] = { ...fresh, description: cur.description ?? fresh.description };
         changed.push(`${preset.name}: ${fresh.panel.join(", ")}`);
       }
     }
+    if (!cfg.profile && Object.keys(cfg.profiles ?? {}).length) cfg.profile = Object.keys(cfg.profiles!)[0];
     await saveUserConfig(cfg);
     log(changed.length ? changed.join("\n") : "all preset profiles already match your connections");
   });
