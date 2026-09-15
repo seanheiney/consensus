@@ -2,7 +2,7 @@
 #   irm https://raw.githubusercontent.com/seanheiney/consensus/main/install.ps1 | iex
 $ErrorActionPreference = "Stop"
 $pkg = "consensus-panel"
-$repo = if ($env:CONSENSUS_REPO) { $env:CONSENSUS_REPO } else { "github:seanheiney/consensus" }
+$repo = if ($env:CONSENSUS_REPO) { $env:CONSENSUS_REPO } else { "https://github.com/seanheiney/consensus/archive/refs/heads/main.tar.gz" }
 function Have($cmd) { return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 if (-not (Have node)) {
   Write-Host "Node.js 20+ is required." -ForegroundColor Yellow

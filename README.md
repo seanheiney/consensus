@@ -28,7 +28,7 @@ One line, nothing else needed (installs Node 20+ if you don't have it, then the 
 curl -fsSL https://raw.githubusercontent.com/seanheiney/consensus/main/install.sh | sh
 ```
 
-Non-interactive: `curl -fsSL … | sh -s -- --yes`. Windows: `irm https://raw.githubusercontent.com/seanheiney/consensus/main/install.ps1 | iex`. With Node already installed: `npm install -g consensus-panel && consensus setup` (until the npm release lands, the installer and `npm install -g github:seanheiney/consensus` install straight from this repo).
+Non-interactive: `curl -fsSL … | sh -s -- --yes`. Windows: `irm https://raw.githubusercontent.com/seanheiney/consensus/main/install.ps1 | iex`. With Node already installed: `npm install -g consensus-panel && consensus setup` (until the npm release lands, the installer falls back to `npm install -g https://github.com/seanheiney/consensus/archive/refs/heads/main.tar.gz`, which installs straight from this repo).
 
 `consensus setup` does everything:
 
