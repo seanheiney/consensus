@@ -5,12 +5,12 @@ $pkg = "consensus-panel"
 $repo = if ($env:CONSENSUS_REPO) { $env:CONSENSUS_REPO } else { "https://github.com/seanheiney/consensus/archive/refs/heads/main.tar.gz" }
 function Have($cmd) { return [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
 if (-not (Have node)) {
-  Write-Host "Node.js 20+ is required." -ForegroundColor Yellow
+  Write-Host "Node.js 22+ is required." -ForegroundColor Yellow
   if (Have winget) { winget install --id OpenJS.NodeJS.LTS -e --accept-source-agreements --accept-package-agreements }
   else { throw "Install Node 20+ from https://nodejs.org and re-run." }
 }
 $major = [int]((node -p "process.versions.node.split('.')[0]"))
-if ($major -lt 20) { throw "Node $major found; consensus needs 20+." }
+if ($major -lt 22) { throw "Node $major found; consensus needs 22+." }
 Write-Host "Installing $pkg..."
 $out = npm install -g $pkg 2>&1
 if ($LASTEXITCODE -ne 0) {

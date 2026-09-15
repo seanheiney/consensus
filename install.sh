@@ -3,16 +3,22 @@
 #   curl -fsSL https://raw.githubusercontent.com/seanheiney/consensus/main/install.sh | sh
 # Non-interactive:  curl -fsSL ... | sh -s -- --yes
 #
-# What it does: makes sure Node 20+ exists (installs it if not), installs the
+# What it does: makes sure Node 22+ exists (installs it if not), installs the
 # `consensus` CLI, then runs `consensus setup`, which connects your AI
 # subscriptions / API keys, creates model profiles, installs the skill pack and
 # MCP server into every IDE and agent it finds, and runs a first debate.
 set -eu
 
 PKG="consensus-panel"
-MIN_NODE=20
+MIN_NODE="${CONSENSUS_MIN_NODE:-22}"
 YES=""
-for a in "$@"; do [ "$a" = "--yes" ] || [ "$a" = "-y" ] && YES="--yes"; done
+SETUP_ARGS=""
+for a in "$@"; do
+  case "$a" in
+    --yes|-y) YES="--yes" ;;
+    *) SETUP_ARGS="$SETUP_ARGS $a" ;;   # e.g. --no-first-run, --project, --probe are passed through to `consensus setup`
+  esac
+done
 
 say()  { printf '\033[1m%s\033[0m\n' "$*" >&2; }
 info() { printf '  %s\n' "$*" >&2; }
@@ -26,7 +32,7 @@ node_ok() {
 }
 
 install_node() {
-  say "Node.js $MIN_NODE+ is required. Installing…"
+  say "Node.js $MIN_NODE+ is required. Installing..."
   OS=$(uname -s)
   if [ "$OS" = "Darwin" ] && have brew; then
     info "using Homebrew"; brew install node && return 0
@@ -54,7 +60,7 @@ info "node $(node -v), npm $(npm -v)"
 
 # Fallback until the npm release: install straight from the repo tarball (no git needed).
 REPO="${CONSENSUS_REPO:-https://github.com/seanheiney/consensus/archive/refs/heads/main.tar.gz}"
-say "Installing $PKG…"
+say "Installing ${PKG}..."
 LOG=$(mktemp)
 try_install() { npm install -g "$1" >"$LOG" 2>&1; }
 if ! try_install "$PKG"; then
@@ -68,23 +74,23 @@ if ! try_install "$PKG"; then
     mkdir -p "$PREFIX" && npm config set prefix "$PREFIX"
     export PATH="$PREFIX/bin:$PATH"
     try_install "$PKG" || try_install "$REPO" || { cat "$LOG" >&2; die "npm install failed (see output above)"; }
+    for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
+      if [ -f "$rc" ] && ! grep -q 'npm-global/bin' "$rc"; then printf '\nexport PATH="%s/bin:$PATH"\n' "$PREFIX" >> "$rc"; fi
+    done
+    info "added $PREFIX/bin to your shell PATH (open a new terminal later)"
   else
     cat "$LOG" >&2; die "npm install -g $PKG failed (see output above)"
   fi
-  for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
-    [ -f "$rc" ] && ! grep -q 'npm-global/bin' "$rc" && printf '\nexport PATH="%s/bin:$PATH"\n' "$PREFIX" >> "$rc"
-  done
-  info "added $PREFIX/bin to your shell PATH (open a new terminal later)"
 fi
 have consensus || die "consensus is installed but not on PATH; run: npm bin -g"
 info "consensus $(consensus --version)"
 
-say "Setting up…"
+say "Setting up..."
 # When piped through `sh`, stdin is this script; give the wizard the terminal.
 if [ -t 0 ]; then
-  consensus setup $YES
+  consensus setup $YES $SETUP_ARGS
 elif [ -r /dev/tty ] && [ -z "$YES" ]; then
-  consensus setup </dev/tty
+  consensus setup $SETUP_ARGS </dev/tty
 else
-  consensus setup --yes
+  consensus setup --yes $SETUP_ARGS
 fi

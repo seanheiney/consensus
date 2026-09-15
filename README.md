@@ -22,13 +22,19 @@ panel (balanced): claude:claude-opus-5, codex:gpt-5.6-sol, grok:grok-4.5, gemini
 
 ## Install
 
-One line, nothing else needed (installs Node 20+ if you don't have it, then the CLI, then walks you through setup and a first debate):
+One line, nothing else needed (installs Node 22+ if you don't have it, then the CLI, then walks you through setup and a first debate):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/seanheiney/consensus/main/install.sh | sh
 ```
 
-Non-interactive: `curl -fsSL … | sh -s -- --yes`. Windows: `irm https://raw.githubusercontent.com/seanheiney/consensus/main/install.ps1 | iex`. With Node already installed: `npm install -g consensus-panel && consensus setup` (until the npm release lands, the installer falls back to `npm install -g https://github.com/seanheiney/consensus/archive/refs/heads/main.tar.gz`, which installs straight from this repo).
+Non-interactive: `curl -fsSL … | sh -s -- --yes`. Windows: `irm https://raw.githubusercontent.com/seanheiney/consensus/main/install.ps1 | iex`.
+
+With Node 22+ already installed, this is the equivalent by hand (the npm package is not released yet, so install from the repo tarball):
+
+```bash
+npm install -g https://github.com/seanheiney/consensus/archive/refs/heads/main.tar.gz && consensus setup
+```
 
 `consensus setup` does everything:
 
