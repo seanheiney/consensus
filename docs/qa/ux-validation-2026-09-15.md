@@ -157,3 +157,23 @@ Publish to npm and fill in the GitHub org (blocks every install-path finding); C
 ## 5. Re-run discipline
 
 Next run: JTBD 1 only (after publishing), plus a fresh panel. Expected effect of publishing alone: task-success back to ≥ 3.6 across the panel, since no reviewer found a second blocker.
+
+---
+
+# Fix batch 3 — "get every dimension to 5.0" (same day)
+
+Owner's ask after re-run 1. Reviewer asks were mapped dimension by dimension and everything buildable locally was built; the remaining items need the owner (npm login) or are research deliverables.
+
+**Task-success.** Repo published at https://github.com/seanheiney/consensus (public, CI green on first push). The install one-liner and `install.ps1` now fall back to the repo tarball (`npm install -g https://github.com/seanheiney/consensus/archive/refs/heads/main.tar.gz`) until the npm release; verified: the tarball install yields a working 0.1.0 binary with all shipped packs (the `github:` shorthand form is broken under npm's git-dependency path and is not used). Pre-flight before every run refuses seats whose vendor is not connected and prints the fix; Gemini's retired individual login no longer counts as a connection, so presets stop seating a seat that would be dropped; `profile refresh` re-materializes preset profiles and removes ones no connection can seat. `dist/` is committed so git/tarball installs need no build step.
+
+**Trust.** `--max-cost` spend ceiling (aborts mid-run; unpriced subscription seats excluded and named); one retry on transient failures (429/529/timeout) with `--no-retry`; exit code 2 when the panel shrank; `external:<spec>` judge that did not debate; `consensus uninstall [--purge]` reverses every host change; Claude Code's own `total_cost_usd` used for cost; refusal fallbacks recorded in the debate log (`served-by`); rate-limit and terms disclosure in README, `setup`, and `doctor`.
+
+**Clarity.** Top-level `--help` now shows the flags that matter; `run.json` records `options.defaultEffort` plus authoritative `seats[]` (no contradictory top-level effort); README documents the bring-your-own-model contract and the one-spelling `any:` ids; `doctor` shows per-host "MCP registered / skill installed".
+
+**Delight.** Thinking summaries from Claude API seats land in `debate.md` (collapsible); `consensus log --html` writes a self-contained shareable page of the whole debate.
+
+**Accessibility.** ASCII mode (`CONSENSUS_ASCII=1`, or `LANG=C`/`TERM=dumb`) with words next to every glyph; `NO_COLOR`; normal-weight status lines; `persona add/remove`; Windows installer.
+
+**Still needs the owner:** `npm publish` (not logged in on this machine); a positioning decision on subscription seats; a `GEMINI_API_KEY` and `grok login` to make those vendors live. **Still open (research/larger):** thinking summaries for CLI seats (Claude Code's JSON envelope omits thinking), the ablation study over the starter suite using the new `--baseline` arms, and an MCP task-mode implementation (`taskSupport`).
+
+**Projection, not a measurement:** the reviewers' own justifications tie task-success almost entirely to the install path (now real) and trust to cost honesty, ceilings, retries, and judge neutrality (now built). A fresh panel should move task-success back above run 1 and trust above 3. A 5.0 on every line from expert reviewers would require the ablation evidence (researcher), an npm release plus a first-run success rate (PM/staff engineer), and a term-compliant positioning for subscription seats (Anthropic engineer). The next re-run is JTBD 1 against the public install path plus a fresh panel.
