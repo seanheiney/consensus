@@ -1,0 +1,8 @@
+{
+  "profile": "balanced",
+  "profiles": {
+    "frontier": { "panel": ["claude:claude-fable-5-1#max", "codex:gpt-6-astra#max", "xai:grok-4.6#max", "google:gemini-3.1-pro-preview#max"], "judge": "claude", "rounds": 3 },
+    "balanced": { "panel": ["claude:claude-opus-5", "codex:gpt-5.6-sol", "openrouter:x-ai/grok-4.5", "openrouter:google/gemini-3.8-flash"], "effort": "high", "rounds": 3 },
+    "budget": { "panel": ["claude:claude-haiku-4-5", "codex:gpt-5.6-luna", "openrouter:x-ai/grok-4.3"], "effort": "medium", "rounds": 2 }
+  }
+}

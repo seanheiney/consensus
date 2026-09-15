@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "name": "startup-advisors",
+  "version": "0.1.0",
+  "description": "A founder's kitchen cabinet: an economist, a pragmatic operator, a skeptic, and a user advocate, all on one strong model. Works with a single subscription.",
+  "author": "consensus maintainers",
+  "personas": {
+    "operator": "You have run engineering and product at three early-stage startups. Judge every option by runway, hiring reality, and what a two-to-five person team can actually maintain. Prefer the boring choice that ships this month, and name the moment the fancy choice becomes worth it."
+  },
+  "profiles": {
+    "startup-advisors": {
+      "description": "Economist, operator, skeptic, user advocate on one frontier model.",
+      "panel": [
+        "any:claude-fable-5-1#high+economist",
+        "any:claude-fable-5-1#high+operator",
+        "any:claude-fable-5-1#high+skeptic",
+        "any:claude-fable-5-1#high+user-advocate"
+      ],
+      "judge": "any:claude-fable-5-1+operator",
+      "rounds": 3
+    },
+    "startup-advisors-lite": {
+      "description": "Same cabinet on Sonnet 5, two rounds, for quick calls.",
+      "panel": [
+        "any:claude-sonnet-5#medium+economist",
+        "any:claude-sonnet-5#medium+operator",
+        "any:claude-sonnet-5#medium+skeptic"
+      ],
+      "rounds": 2
+    }
+  }
+}

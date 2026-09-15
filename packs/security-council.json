@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "name": "security-council",
+  "version": "0.1.0",
+  "description": "Threat-model a design or a diff: an attacker, a defender, a pragmatic shipper, and a frontier generalist, on whatever models you have.",
+  "author": "consensus maintainers",
+  "personas": {
+    "attacker": "You are a seasoned offensive security engineer. Assume you are the adversary: what do you control, what can you reach, and what is the cheapest path to data, money, or persistence? Enumerate concrete attacks against the proposal (injection, authz gaps, secrets exposure, race conditions, supply chain, misuse of trusted tools). Rank by likelihood and impact. Say exactly what you would try first.",
+    "defender": "You are the security engineer who must ship a defensible design. For each attack the panel raises, give the specific mitigation, its cost, and the residual risk. Prefer mitigations that remove whole classes of bugs (least privilege, allow-lists, parameterization, isolation) over patches. Say what must be true before this can ship."
+  },
+  "profiles": {
+    "security-council": {
+      "description": "Attacker vs defender vs pragmatist vs a frontier generalist.",
+      "panel": [
+        "any:claude-opus-5#high+attacker",
+        "any:gpt-5.6-sol#high+defender",
+        "any:grok-4.5#high+pragmatist",
+        "any:gemini-3.1-pro-preview#high"
+      ],
+      "judge": "any:claude-opus-5",
+      "rounds": 3
+    }
+  },
+  "suite": {
+    "name": "security-council",
+    "cases": [
+      {
+        "id": "webhook-verify",
+        "tags": ["security", "judgment"],
+        "prompt": "A payment provider sends webhooks to our Node service. Propose the verification and idempotency design. Decide whether to verify by shared-secret HMAC, by fetching the event back from the provider API, or both, and how to store processed event ids.",
+        "rubric": "Requires signature verification with a constant-time compare and a timestamp/replay window; recommends idempotency keyed by event id with a durable store; discusses fetch-back as defense in depth and its cost; mentions secret rotation and failing closed."
+      }
+    ]
+  }
+}

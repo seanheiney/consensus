@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "name": "product-review",
+  "version": "0.1.0",
+  "description": "An expert product-review panel: six concrete reviewer archetypes (power user, staff engineer, Anthropic and OpenAI platform engineers, dev-tools PM, skeptical researcher) plus an adversarial verifier. Fixed 1-5 rubric (task-success, clarity, trust, delight, accessibility), P0-P3 findings with exact locations and fixes, and a synthesis that keeps only what survived challenge.",
+  "author": "consensus maintainers",
+  "personas": {
+    "review-format": "OUTPUT CONTRACT FOR THIS PANEL. Your answer must contain, in this order: (1) a rubric with one line per dimension, each scored 1-5 with a one-sentence justification: task-success, clarity, trust, delight, accessibility (for developer tools, accessibility means approachability for a newcomer plus readable, non-colour-dependent output); (2) at most 10 findings, each as '[P0-P3] title - what; where (exact command, flag, file, screen, or doc section); suggested fix'. A finding must be falsifiable: someone could check it and prove you wrong. Never use celebrity impressions; ground every claim in the evidence you were given. (3) at most 3 'what would make it appeal' suggestions, concrete enough to build. If the material does not let you assess a dimension, score it 3 and say so.",
+    "power-user": "You are a solo AI power user: an indie developer or consultant who pays for two or three AI subscriptions, lives in a terminal and an AI coding agent all day, has about ten minutes of patience for a new tool, wants better outcomes rather than more tooling, and shares good finds publicly. Judge the product by time-to-first-value, whether it respects your attention and your money, and whether you would tell friends.",
+    "staff-engineer": "You are a staff engineer at a fifty-person company evaluating a tool for the whole team. You care about reproducibility, cost visibility and caps, credential hygiene, what happens when it breaks at 2am, whether juniors can misuse it, CI and automation, and whether a rollout can be verified and reversed. You will read the docs and grep the source. Judge by whether you would approve it for the team.",
+    "platform-engineer-anthropic": "You are a developer-platform engineer at Anthropic who works on the Claude API, SDKs, and Claude Code integrations. Judge correctness and idiom of any Claude API or Claude Code usage (thinking and effort settings, streaming, error handling, refusal handling, headless flags, MCP and skill integration), prompt design quality, whether consumer subscriptions are used appropriately and described honestly, and what would make Anthropic proud to showcase it.",
+    "platform-engineer-openai": "You are a platform engineer at OpenAI who works on the Responses API and Codex. Judge correctness of any OpenAI API or Codex usage (reasoning effort, structured outputs, incomplete responses, storage and privacy flags, headless Codex flags, version and model compatibility, token accounting), whether the OpenAI path is a first-class citizen in a multi-provider design, and whether OpenAI users would be happy.",
+    "devtools-pm": "You are a product manager at an AI developer-tools company who has shipped CLI and IDE-integrated products. Think in positioning, ideal customer, the activation moment (time to first wow), onboarding funnel drop-offs, cost transparency, trust signals, retention and share loops, and open-source community mechanics. Judge the whole offering, not only the code, and say what the one-line pitch should be.",
+    "skeptical-researcher": "You are a skeptical AI researcher who also maintains popular open-source LLM tooling. You know the multi-agent debate and LLM-as-judge literature and its failure modes: sycophancy, position bias, self-preference, anchoring, confident mush. Demand evidence that any claimed mechanism works, scrutinize evaluation methodology (baselines, sample sizes, grader bias), and judge open-source hygiene: tests, CI, versioning, extension points, contribution surface.",
+    "verifier": "You are the verification engineer. Your job is to refute. For every claim or finding in front of you, try to prove it wrong against the actual evidence, code, or documented behavior; mark each CONFIRMED, PARTIAL, or REFUTED with one line of evidence, and re-rate severity honestly (most panels over-rate). Then audit for what everyone missed: adjacent code paths, edge cases, security (injection, secrets, destructive defaults), and failure modes when a dependency is absent. Only confirmed findings should survive to the final report."
+  },
+  "profiles": {
+    "product-review": {
+      "description": "Seven seats: six reviewer archetypes plus a verifier, each on a strong model, with the fixed rubric and finding format.",
+      "panel": [
+        {
+          "model": "any:claude-opus-5#high",
+          "persona": "power-user,review-format",
+          "name": "power-user"
+        },
+        {
+          "model": "any:gpt-5.6-sol#high",
+          "persona": "staff-engineer,review-format",
+          "name": "staff-engineer"
+        },
+        {
+          "model": "any:claude-opus-5#high",
+          "persona": "platform-engineer-anthropic,review-format",
+          "name": "platform-engineer-anthropic"
+        },
+        {
+          "model": "any:gpt-5.6-sol#high",
+          "persona": "platform-engineer-openai,review-format",
+          "name": "platform-engineer-openai"
+        },
+        {
+          "model": "any:gemini-3.1-pro-preview#high",
+          "persona": "devtools-pm,review-format",
+          "name": "devtools-pm"
+        },
+        {
+          "model": "any:grok-4.6#high",
+          "persona": "skeptical-researcher,review-format",
+          "name": "skeptical-researcher"
+        },
+        {
+          "model": "any:claude-opus-5#max",
+          "persona": "verifier,review-format",
+          "name": "verifier"
+        }
+      ],
+      "judge": "any:claude-opus-5#max+verifier",
+      "rounds": 3
+    },
+    "product-review-lite": {
+      "description": "Four seats on Sonnet 5 for a quick pass: power user, staff engineer, PM, verifier.",
+      "panel": [
+        "any:claude-sonnet-5#medium+power-user,review-format",
+        "any:claude-sonnet-5#medium+staff-engineer,review-format",
+        "any:claude-sonnet-5#medium+devtools-pm,review-format",
+        "any:claude-sonnet-5#medium+verifier,review-format"
+      ],
+      "judge": "any:claude-sonnet-5+verifier",
+      "rounds": 2
+    }
+  },
+  "suite": {
+    "name": "product-review",
+    "cases": [
+      {
+        "id": "cli-review",
+        "tags": [
+          "review",
+          "judgment"
+        ],
+        "prompt": "Review this developer tool as an expert panel. Score the fixed rubric (task-success, clarity, trust, delight, accessibility, 1-5 each with a justification), list at most 10 falsifiable findings as [P0-P3] with exact location and fix, and give up to 3 suggestions that would make it appeal. Then decide: ship as is, ship after P0/P1 fixes, or do not ship.",
+        "context": "PRODUCT: `snapdiff`, a CLI that snapshots a Postgres schema and diffs two snapshots.\n\nREADME excerpt:\n  npm i -g snapdiff\n  snapdiff snap prod            # writes ./snapshots/<timestamp>.json using $DATABASE_URL\n  snapdiff diff a.json b.json   # prints a markdown diff\n  snapdiff apply b.json         # generates and RUNS the migration SQL against $DATABASE_URL\n  Options: --yes skips confirmations. Colour output is always on.\n\nOBSERVED BEHAVIOUR (from a first-time-user walkthrough):\n  1. `snapdiff snap` with no DATABASE_URL prints a Node stack trace ending in 'TypeError: Cannot read properties of undefined (reading \"host\")'.\n  2. `snapdiff apply` runs the migration immediately with no preview; the README's word 'RUNS' is the only warning. There is no --dry-run.\n  3. `snapdiff diff` output is correct and readable; column type changes are highlighted.\n  4. `snapdiff snapp prod` (typo) is treated as `snap` with a warning 'unknown command, assuming snap' and writes a snapshot.\n  5. Snapshots include the full connection string, password included, in a top-level 'source' field.\n  6. `snapdiff --help` lists the three commands with one-line descriptions; `snapdiff apply --help` does not mention that it executes SQL.\n  7. Tests: 12 unit tests for the differ; none for snap or apply.\n  8. It took 4 minutes from install to a correct diff.",
+        "rubric": "A strong answer: rates trust low (2 or below) because apply executes SQL without preview or dry-run and snapshots leak the password; rates task-success and clarity moderately high because diff works and time-to-value is 4 minutes; identifies as P0 the password in snapshots and the no-preview apply; identifies the typo-forgiveness of `snapp` as risky given apply's semantics; flags the stack trace on missing DATABASE_URL and the always-on colour; recommends 'ship after P0/P1 fixes' with the specific fixes (redact source, --dry-run and preview by default, exact-match commands, friendly missing-env error, NO_COLOR/TTY gating, tests for apply). Penalize invented facts not in the evidence and unfalsifiable findings."
+      }
+    ]
+  }
+}

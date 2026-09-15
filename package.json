@@ -1,0 +1,75 @@
+{
+  "name": "consensus-panel",
+  "version": "0.1.0",
+  "description": "Throw a problem at a panel of frontier models, let them debate adversarially, and get one consensus answer. CLI, MCP server, and library.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "consensus": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "packs",
+    "README.md",
+    "PACKS.md",
+    "LICENSE",
+    "install.sh"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "prepublishOnly": "pnpm build",
+    "prepare": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "ci": "pnpm typecheck && pnpm test && pnpm build && npm pack --dry-run"
+  },
+  "keywords": [
+    "llm",
+    "consensus",
+    "multi-model",
+    "debate",
+    "mcp",
+    "claude",
+    "openai",
+    "grok",
+    "gemini",
+    "agentic"
+  ],
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.125.0",
+    "@clack/prompts": "^1.8.1",
+    "@google/genai": "^2.22.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "commander": "^15.0.0",
+    "openai": "^7.15.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/seanheiney/consensus.git"
+  },
+  "homepage": "https://github.com/seanheiney/consensus#readme",
+  "bugs": {
+    "url": "https://github.com/seanheiney/consensus/issues"
+  },
+  "author": "Sean Heiney"
+}
