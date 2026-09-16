@@ -258,7 +258,9 @@ async function runOne(target, c, o, trial) {
             await mkdir(dir, { recursive: true });
             await writeFile(join(dir, `${c.id}${trial ? `.${trial + 1}` : ""}.json`), JSON.stringify(run, null, 2));
         }
-        return { ...base, ok: true, ms: Date.now() - t0, converged: run.converged, rounds: run.rounds.length, usage, costUsd: cost.usd, subscriptionUsd: cost.subscriptionEquivUsd, unpriced: cost.unpriced, dropped: Object.keys(run.dropped), answer: run.synthesis, runId: run.id };
+        const revisions = run.rounds.reduce((n, rd) => n + Object.keys(rd.revisions ?? {}).length, 0);
+        const moderated = run.rounds.some((rd) => rd.moderation !== undefined);
+        return { ...base, ok: true, ms: Date.now() - t0, converged: run.converged, rounds: run.rounds.length, revisions, moderated, usage, costUsd: cost.usd, subscriptionUsd: cost.subscriptionEquivUsd, unpriced: cost.unpriced, dropped: Object.keys(run.dropped), answer: run.synthesis, runId: run.id };
     }
     catch (err) {
         return { ...base, ms: Date.now() - t0, error: err.message.split("\n")[0].slice(0, 300) };
@@ -402,6 +404,26 @@ export function renderBench(r) {
                 }
                 lines.push(`| ${pnl} | ${sg} | ${qw} / ${qt} / ${ql} | ${aw} / ${at} / ${al} |`);
             }
+        // Per-case pairing so a reader can see which cases the panel won or lost, not just the totals.
+        lines.push("", "### Paired by case (quality: panel − baseline; + is a panel win)", "", `| Case | ${panels.flatMap((p) => singles.map((s) => `${p} vs ${s}`)).join(" | ")} |`, `|---|${panels.flatMap(() => singles.map(() => "---:")).join("|")}|`);
+        const keys = [...new Set(r.results.map((x) => `${x.caseId}${x.trial ? ` (trial ${x.trial + 1})` : ""}`))];
+        for (const key of keys) {
+            const cells = panels.flatMap((pnl) => singles.map((sg) => {
+                const x = r.results.find((y) => y.profile === pnl && `${y.caseId}${y.trial ? ` (trial ${y.trial + 1})` : ""}` === key && y.ok);
+                const y = r.results.find((z) => z.profile === sg && `${z.caseId}${z.trial ? ` (trial ${z.trial + 1})` : ""}` === key && z.ok);
+                if (!x || !y || x.quality === null || y.quality === null)
+                    return "–";
+                const d = x.quality - y.quality;
+                return d > 0 ? `+${d.toFixed(1)} W` : d < 0 ? `${d.toFixed(1)} L` : "0 T";
+            }));
+            lines.push(`| ${key} | ${cells.join(" | ")} |`);
+        }
+        const panelRuns = r.results.filter((x) => panels.includes(x.profile) && x.ok);
+        if (panelRuns.length) {
+            const withRev = panelRuns.filter((x) => (x.revisions ?? 0) > 0).length;
+            const mod = panelRuns.filter((x) => x.moderated).length;
+            lines.push("", `_Debate activity: ${withRev}/${panelRuns.length} panel runs had at least one seat revise its answer; ${mod}/${panelRuns.length} were moderated by a captain._`);
+        }
     }
     lines.push("", "## Per case", "", "_Notes come from the blind grader, which sees every arm's answer for a case relabelled A, B, C…; those letters are the grader's, not the debate's seat labels._", "", "| Case | Arm | Accuracy | Quality | Converged | Rounds | Time | Billed | Sub. equiv. | Notes |", "|---|---|---:|---:|---:|---:|---:|---:|---:|---|");
     for (const x of r.results) {

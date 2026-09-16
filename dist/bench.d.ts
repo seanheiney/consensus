@@ -43,6 +43,9 @@ export interface CaseResult {
     ms: number;
     converged: boolean;
     rounds: number;
+    /** Panel arms: how many seats revised their answer (concede/rebut) across the run, and whether the captain moderated. */
+    revisions?: number;
+    moderated?: boolean;
     usage: Usage;
     costUsd: number | null;
     subscriptionUsd?: number | null;
