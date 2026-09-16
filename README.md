@@ -31,7 +31,7 @@ You get back: the answer, a confidence level, what the panel agreed on, what it 
 ## Quickstart (90 seconds)
 
 ```bash
-# 1. install (gets Node 22+ if you don't have it, installs the CLI, runs setup)
+# 1. install: one download (no Node, npm or sudo needed), then the setup wizard
 curl -fsSL https://raw.githubusercontent.com/seanheiney/consensus/main/install.sh | sh
 
 # 2. setup connects your accounts, builds profiles, teaches your IDEs, and runs
@@ -60,13 +60,14 @@ consensus "…" --profile <the name it chose>
 | macOS / Linux | `curl -fsSL https://raw.githubusercontent.com/seanheiney/consensus/main/install.sh \| sh` |
 | macOS / Linux, unattended | `curl -fsSL https://raw.githubusercontent.com/seanheiney/consensus/main/install.sh \| sh -s -- --yes` |
 | Windows (PowerShell) | `irm https://raw.githubusercontent.com/seanheiney/consensus/main/install.ps1 \| iex` |
-| You already have Node 22+ | `npm install -g https://github.com/seanheiney/consensus/archive/refs/heads/main.tar.gz && consensus setup` |
+| npm (you manage Node 22+) | `npm install -g https://github.com/seanheiney/consensus/archive/refs/heads/main.tar.gz && consensus setup` (`consensus-panel` on npm once published) |
 | From source | `git clone https://github.com/seanheiney/consensus && cd consensus && pnpm install && pnpm build && npm link` |
-| npm | `npm install -g consensus-panel` — **not published yet**; use the tarball line above |
 
-Requirements: **Node 22 or newer**, and at least two model connections. The installer takes `--help`, `--yes`, `--no-setup`, and a `CONSENSUS_INSTALL_DIR` prefix override.
+The one-liners need **no Node, no npm and no sudo**: they download a self-contained build (the official Node 22 runtime plus the bundled CLI, about 38 MB), verify it against the release's `SHA256SUMS`, install it under `~/.consensus` with a `~/.local/bin/consensus` link, add one marked line to your shell rc files, and start `consensus setup` in the same terminal. Re-running upgrades in place (and runs `consensus doctor` instead of the wizard). Your own Node, if any, is never used or changed. No telemetry. Later: `consensus update`, `consensus uninstall --all`.
 
-Full details — what the installer writes where, npm permission fixes, proxies, air-gapped installs, upgrading, uninstalling, and a troubleshooting table: **[docs/install.md](docs/install.md)**.
+You need at least two model connections for a panel. Installer options: `--help`, `--yes`, `--no-setup`, `--version <x.y.z>`, `--no-modify-path`, `--dir`, and `CONSENSUS_*` environment equivalents.
+
+Full details — what the installer writes where, verifying releases, proxies, air-gapped installs, upgrading, uninstalling, and a troubleshooting table: **[docs/install.md](docs/install.md)**.
 
 ## What `consensus setup` does
 
@@ -75,7 +76,7 @@ Full details — what the installer writes where, npm permission fixes, proxies,
 3. **Teaches your tools.** Registers the MCP server and drops a skill pack into Claude Code, Codex, Gemini CLI, Grok, Cursor, Windsurf, Claude Desktop, and the cross-tool `~/.agents/skills` directory. Your agent then knows the panel exists and when to reach for it.
 4. **Runs a first debate** so you see a real result and where the log lives.
 
-`consensus setup --yes` does all of it with no questions. `consensus doctor --probe` shows what is connected and makes one tiny call through each to prove it. `consensus uninstall [--purge]` reverses every change.
+`consensus setup --yes` does all of it with no questions. `consensus doctor --probe` shows what is connected and makes one tiny call through each to prove it. `consensus uninstall [--all] [--purge]` reverses every change.
 
 ## How your subscriptions are used
 

@@ -492,7 +492,7 @@ The designer reuses built-in personas when they fit, writes new ones for other e
 | `--judge external:<spec>` / `external:auto` | A judge that did not debate. `auto` picks the strongest seatable model of a vendor not on the panel. |
 | `#xhigh` | Effort rung between high and max; Claude, OpenAI and Codex honour it, other routes map it to high. |
 | Exit codes | 0 ok · 1 error · 2 a seat was dropped (panel shrank) · 3 stopped by `--max-cost` (partial saved) |
-| `CONSENSUS_VERSION` / `CONSENSUS_SHA256` | Install a tagged release, optionally verifying the tarball checksum. |
+| `CONSENSUS_VERSION` / `CONSENSUS_DOWNLOAD_BASE` | Installer: install a tagged release / download from a mirror. See [install.md](install.md). |
 
 Cost lines separate what API keys will bill from what subscription seats consumed as quota (shown as a list-price equivalent), and name any seat that reported no usage.
 

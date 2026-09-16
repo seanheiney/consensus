@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Added
+- One-paste standalone install: release archives with the official Node 22 runtime and the CLI bundled into one file (`scripts/bundle.mjs`, `scripts/package.mjs`), built for macOS arm64/x64, Linux x64/arm64 and Windows x64/arm64 with `SHA256SUMS` and build-provenance attestations (`release.yml`).
+- `install.sh` rewrite: no Node, npm or sudo; Rosetta and musl detection; curl or wget with progress; sha256 verification; `~/.consensus/versions/<ver>` + `current`; `~/.local/bin/consensus`; `~/.consensus/env` + one guarded rc line (zsh, bash, fish, sh); receipt; step counter and elapsed time; `exec setup </dev/tty` on a fresh install, `doctor` on upgrade, instructions without a terminal; `--version`, `--dir`, `--no-modify-path`, `--allow-root`, `--dry-run`, `CONSENSUS_DOWNLOAD_BASE`. Until a release exists it falls back to a private Node + npm prefix install (no brew/fnm/nvm/global npm).
+- `install.ps1` rewrite with the same design (user PATH, junction, receipt, scriptblock parameters).
+- `consensus update`, `consensus uninstall --all`, an Install section in `consensus doctor`, and an end-of-setup summary (install, PATH, accounts, profiles, IDEs, no telemetry).
+- `test/install/run-docker.sh`: installer end-to-end on ubuntu:24.04, debian:bookworm-slim and node:22-bookworm; CI installer smoke on Linux, macOS and Windows.
+
+### Changed
+- MCP hosts are registered with the stable launcher (`~/.local/bin/consensus`) on standalone installs, never a versioned Node path.
+- Setup no longer defaults to installing vendor CLIs: one multiselect, key-or-login defaults, explicit confirmation for `npm install -g`, `codex login --device-auth` when headless, 5-minute cap on vendor logins, profiles saved as soon as they are created, and a "not ready: next step" ending (exit 3 under `--yes`) instead of "Done" with fewer than 2 models.
 - `docs/install.md`, `docs/usage.md`, `docs/faq.md` and a `docs/` index.
 - `CONTRIBUTING.md`, `SECURITY.md`, this changelog, and GitHub issue / pull-request templates.
 - `install.sh`: `--help`, `--version`, `--no-setup`, a version banner, and a `CONSENSUS_INSTALL_DIR` prefix override. `install.ps1`: `-Help`, `-Version`, `-Yes`, `-NoSetup`, and the same prefix override.

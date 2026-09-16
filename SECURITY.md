@@ -66,7 +66,7 @@ Saved runs contain your **verbatim** prompt and any context you pasted. `.consen
 
 ## Supply chain
 
-The installer fetches `install.sh` over HTTPS from `raw.githubusercontent.com` and installs the package with npm. **Checksums and signature verification are planned but not implemented.** Until they exist, the auditable path is to download the script, read it, and run it:
+The installer script is fetched over HTTPS from `raw.githubusercontent.com`. It downloads a release archive from GitHub Releases and **verifies its SHA-256 against the release's `SHA256SUMS`** before unpacking; a mismatch deletes the download and stops (exit 4). The archives are built by `.github/workflows/release.yml` from the tagged commit and carry **GitHub build-provenance attestations** (`gh attestation verify consensus-linux-x64.tar.gz --repo seanheiney/consensus`). The Node runtime inside each archive is the official nodejs.org binary, checked against nodejs.org's `SHASUMS256.txt` at build time. `SHA256SUMS` itself is not separately signed. See [docs/install.md](docs/install.md#verifying-the-install). The auditable path is still to download the script, read it, and run it:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/seanheiney/consensus/main/install.sh -o install.sh
@@ -74,13 +74,9 @@ less install.sh
 sh install.sh
 ```
 
-or skip the script entirely and install the package directly:
+or skip the script entirely: download `consensus-<os>-<arch>.tar.gz` and `SHA256SUMS`, check them yourself, and extract anywhere.
 
-```bash
-npm install -g https://github.com/seanheiney/consensus/archive/refs/heads/main.tar.gz
-```
-
-The installer never requires root. The one path that would use `sudo` (NodeSource apt packages on Linux) is off unless you set `CONSENSUS_SYSTEM_NODE=1`.
+The installer never uses `sudo` and refuses to run as root unless you pass `--allow-root`. It never installs a system Node or runs `npm install -g` into a system prefix; while no release exists, its fallback downloads the official Node into `~/.consensus` (sha256-verified) and npm-installs consensus into a prefix there.
 
 ## Supported versions
 
