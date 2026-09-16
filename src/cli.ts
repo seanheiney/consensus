@@ -26,6 +26,13 @@ import { connectVendor, runSetup, statusLine } from "./setup.js";
 import { listRuns, loadRun, saveRun } from "./store.js";
 import { eventToTerminal, openDebateLog } from "./debatelog.js";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { findReceipt, installKind, uninstallStandalone, type InstallKind } from "./install-receipt.js";
+
+function kindLabel(kind: InstallKind): string {
+  return kind === "npm" ? "npm package" : kind === "archive" ? "release archive (unpacked by hand)" : kind === "standalone" ? "standalone install" : "source checkout";
+}
+import { onPath } from "./providers/index.js";
 import type { ConsensusEvent, Effort } from "./types.js";
 
 const require = createRequire(import.meta.url);
@@ -291,7 +298,16 @@ program
       const parts = [h.installMcp ? `MCP ${i.mcp ? "registered" : "not registered"}` : undefined, h.installSkill ? `skill ${i.skill ? "installed" : "missing"}` : undefined].filter(Boolean).join(", ");
       log(`  ${h.detected ? G.ok : G.no} ${h.name.padEnd(28)} ${h.detected ? dim(parts) : dim("not detected")}`);
     }
-    log(dim(`  MCP launch command: ${mcpLaunchCommand().join(" ")}`));
+    const launch = mcpLaunchCommand().join(" ");
+    const gui = mcpLaunchCommand({ absolute: true }).join(" ");
+    log(dim(`  MCP launch command: ${launch}${gui !== launch ? `  (GUI apps: ${gui})` : ""}`));
+    const inst = findReceipt();
+    const kind = installKind(process.env, fileURLToPath(import.meta.url));
+    log(bold("\nInstall"));
+    if (kind === "standalone" && inst) {
+      log(`  standalone ${inst.receipt?.version ?? version} (${inst.receipt?.platform ?? process.platform + "-" + process.arch}, bundled Node ${process.versions.node}) in ${inst.root}`);
+      if (inst.receipt) log(dim(`  launcher ${inst.receipt.launcher}${onPath("consensus") ? "" : "  (not on this shell's PATH yet: open a new terminal)"}`));
+    } else log(dim(`  ${kindLabel(kind)} ${version}, Node ${process.versions.node} (${process.execPath})`));
     if (o.probe) {
       const specs = statuses.filter((s) => s.connected).map((s) => s.spec!);
       log(bold("\nLive probe"));
@@ -746,10 +762,11 @@ bench
 // ---- uninstall -----------------------------------------------------------
 program
   .command("uninstall")
-  .description("remove the MCP registration and skill packs from every host, and optionally your config and saved keys (non-interactive; --yes accepted for symmetry)")
+  .description("remove the MCP registration and skill packs from every host; --all also removes the standalone install; --purge also your config and saved keys (non-interactive)")
+  .option("--all", "also remove the standalone install: ~/.consensus, the ~/.local/bin/consensus link, and the PATH lines the installer added")
   .option("--purge", "also delete ~/.config/consensus (profiles, packs, saved API keys)")
   .option("-y, --yes", "no-op: uninstall never prompts")
-  .action(async (o: { purge?: boolean }) => {
+  .action(async (o: { purge?: boolean; all?: boolean }) => {
     for (const h of listHosts().filter((x) => x.detected && x.uninstall)) {
       try {
         const done = await h.uninstall!();
@@ -763,7 +780,54 @@ program
       const { configDir } = await import("./credentials.js");
       await rm(configDir(), { recursive: true, force: true });
       log(`${green(G.ok)} removed ${configDir()}`);
-    } else log(dim("config and saved keys kept (add --purge to delete ~/.config/consensus). Then: npm uninstall -g consensus-panel"));
+    } else log(dim("config and saved keys kept (add --purge to delete ~/.config/consensus)."));
+    const kind = installKind(process.env, fileURLToPath(import.meta.url));
+    if (o.all) {
+      const done = await uninstallStandalone();
+      for (const d of done) log(`${green(G.ok)} ${d}`);
+      if (!done.length) log(dim(`${G.no} no standalone install found`));
+      if (kind === "npm") log(dim("this copy was installed with npm; remove it with: npm uninstall -g consensus-panel"));
+    } else if (kind === "standalone") log(dim("the CLI itself is still installed (add --all to remove ~/.consensus, the launcher link and the PATH lines)."));
+    else if (kind === "npm") log(dim("the CLI itself is still installed: npm uninstall -g consensus-panel"));
+  });
+
+// ---- update ---------------------------------------------------------------
+program
+  .command("update")
+  .argument("[version]", "release to install, e.g. 0.2.0 (default: latest)")
+  .description("update consensus: re-runs the installer for standalone installs, prints the npm command otherwise")
+  .action(async (target: string | undefined) => {
+    const kind = installKind(process.env, fileURLToPath(import.meta.url));
+    if (kind === "npm") return log(`installed with npm; update with:\n  npm install -g consensus-panel${target ? `@${target.replace(/^v/, "")}` : "@latest"}`);
+    if (kind === "source") return log("running from a source checkout; update with:\n  git pull && pnpm install && pnpm build");
+    if (kind === "archive") return log("running from a release archive unpacked by hand; download the new one from https://github.com/seanheiney/consensus/releases, or install with the one-line installer to get `consensus update`.");
+    const inst = findReceipt()!;
+    const { spawnSync } = await import("node:child_process");
+    const env: NodeJS.ProcessEnv = { ...process.env, CONSENSUS_ROOT: inst.root };
+    delete env.CONSENSUS_HOME;
+    if (inst.receipt?.binDir) env.XDG_BIN_HOME = inst.receipt.binDir;
+    if (process.platform === "win32") {
+      const url = process.env.CONSENSUS_INSTALLER_URL ?? "https://raw.githubusercontent.com/seanheiney/consensus/main/install.ps1";
+      const args = `-NoSetup${target ? ` -Version '${target.replace(/'/g, "")}'` : ""}`;
+      const r = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", `& ([scriptblock]::Create((Invoke-RestMethod '${url}'))) ${args}`], { stdio: "inherit", env });
+      process.exitCode = r.status ?? 1;
+      return;
+    }
+    const url = process.env.CONSENSUS_INSTALLER_URL ?? "https://raw.githubusercontent.com/seanheiney/consensus/main/install.sh";
+    log(dim(`fetching ${url}`));
+    const script = /^https?:\/\//.test(url) ? await (async () => {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`could not download the installer from ${url}: ${res.status} ${res.statusText}`);
+      return res.text();
+    })() : await readFile(url, "utf8");
+    const { mkdtemp, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const dir = await mkdtemp(join(tmpdir(), "consensus-update-"));
+    const file = join(dir, "install.sh");
+    await writeFile(file, script);
+    const r = spawnSync("sh", [file, "--no-setup", ...(target ? [target] : [])], { stdio: "inherit", env });
+    await rm(dir, { recursive: true, force: true });
+    process.exitCode = r.status ?? 1;
   });
 
 // ---- models ---------------------------------------------------------------

@@ -33,6 +33,9 @@ importers:
       '@types/node':
         specifier: ^26.5.1
         version: 26.5.1
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
       tsx:
         specifier: ^4.23.13
         version: 4.23.13

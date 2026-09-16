@@ -11,6 +11,7 @@ import { runCommand } from "./providers/cli.js";
 import { onPath } from "./providers/index.js";
 import { CURSOR_RULE, RULES_BLOCK, SKILL_MD, SKILL_NAME, removeBlock, upsertBlock, writeSkill } from "./skillpack.js";
 import { rm } from "node:fs/promises";
+import { standaloneLauncher } from "./install-receipt.js";
 
 export interface Host {
   id: string;
@@ -161,16 +162,30 @@ async function viaCli(bin: string, removeArgs: string[], addArgs: string[]): Pro
 
 /**
  * The command other tools should launch to start our MCP server.
- * A `consensus` binary on PATH is preferred; otherwise the absolute path of
- * this very install (works for a git checkout and for npx caches alike).
+ *
+ * - Standalone install (install.sh / install.ps1): always the absolute stable
+ *   launcher (~/.local/bin/consensus, or ~/.consensus/current/bin/consensus).
+ *   It survives upgrades, never depends on a versioned Node path, and does not
+ *   rely on the host inheriting a shell PATH.
+ * - Otherwise a `consensus` binary on PATH is preferred, then the absolute
+ *   path of this very install (source checkout, npm global, npx cache).
+ *
+ * `absolute` is for GUI apps (Cursor, Windsurf, Claude Desktop, VS Code, Zed),
+ * which do not inherit a shell PATH. `portable` is for project files
+ * (.mcp.json) that get committed and must not contain a home-directory path.
  */
-export function mcpLaunchCommand(opts: { absolute?: boolean } = {}): string[] {
-  const cli = fileURLToPath(new URL("./cli.js", import.meta.url));
+export function mcpLaunchCommand(opts: { absolute?: boolean; portable?: boolean; env?: NodeJS.ProcessEnv } = {}): string[] {
+  const env = opts.env ?? process.env;
+  const launcher = standaloneLauncher(env);
+  if (launcher) return opts.portable ? ["consensus", "mcp"] : [launcher, "mcp"];
+  const here = dirname(fileURLToPath(import.meta.url));
+  // dist/cli.js for tsc builds, app/cli.mjs for the esbuild bundle (this code is inlined into it).
+  const cli = [join(here, "cli.js"), join(here, "cli.mjs")].find((f) => existsSync(f));
   // GUI apps (Cursor, Windsurf, Claude Desktop) don't inherit a shell PATH, so
   // they need the node binary and script spelled out.
-  if (opts.absolute && existsSync(cli)) return [process.execPath, cli, "mcp"];
-  if (onPath("consensus")) return ["consensus", "mcp"];
-  return existsSync(cli) ? [process.execPath, cli, "mcp"] : ["npx", "-y", "consensus-panel", "mcp"];
+  if (opts.absolute && cli) return [process.execPath, cli, "mcp"];
+  if (onPath("consensus", env)) return ["consensus", "mcp"];
+  return cli ? [process.execPath, cli, "mcp"] : ["npx", "-y", "consensus-panel", "mcp"];
 }
 
 function fileHas(path: string, needle: string): boolean {
@@ -322,7 +337,7 @@ export async function installProjectSkills(cwd = process.cwd()): Promise<string[
 
 /** Project-level MCP config: .mcp.json (Claude Code) and .cursor/mcp.json. */
 export async function installProjectMcp(cwd = process.cwd()): Promise<string[]> {
-  const cmd = mcpLaunchCommand();
+  const cmd = mcpLaunchCommand({ portable: true });
   const out: string[] = [];
   out.push(await mergeMcpJson(join(cwd, ".mcp.json"), cmd));
   out.push(await mergeMcpJson(join(cwd, ".cursor", "mcp.json"), cmd));

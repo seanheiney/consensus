@@ -25,6 +25,48 @@ jobs:
       - run: npm pack --dry-run
       - run: node dist/cli.js --help
       - run: node dist/cli.js bogus && exit 1 || true   # a bare word must be refused, never run
+
+  # Builds this runner's standalone archive and installs it with install.sh from piped stdin,
+  # with no Node on PATH, the way `curl | sh` does. The docker matrix (test/install/run-docker.sh)
+  # covers more distros; run it locally.
+  installer:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: lint install.sh
+        if: runner.os == 'Linux'
+        run: |
+          dash -n install.sh
+          shellcheck -s sh install.sh test/install/run-docker.sh
+      - name: bundle
+        run: node scripts/bundle.mjs && node build/app/cli.mjs --version && node scripts/mcp-smoke.mjs node build/app/cli.mjs
+      - name: package for this runner
+        run: |
+          node scripts/package.mjs "$(node -p 'process.platform')" "$(node -p 'process.arch')"
+          node scripts/package.mjs sums
+      - name: install.sh (piped, no node on PATH), twice
+        run: |
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory dist-release >/dev/null 2>&1 &
+          sleep 2
+          h=$(mktemp -d)
+          cat install.sh | env -i PATH=/usr/bin:/bin HOME="$h" SHELL=/bin/bash CONSENSUS_DOWNLOAD_BASE=http://127.0.0.1:8765 sh -s -- --no-setup
+          env -i PATH=/usr/bin:/bin HOME="$h" bash -lc 'command -v consensus && consensus --version'
+          test "$(grep -c '# consensus' "$h/.bashrc")" = 1
+          cat install.sh | env -i PATH=/usr/bin:/bin HOME="$h" SHELL=/bin/bash CONSENSUS_DOWNLOAD_BASE=http://127.0.0.1:8765 sh -s -- --no-setup 2>&1 | tee "$h/second.log"
+          grep -q 'already current' "$h/second.log"
+          test "$(grep -c '# consensus' "$h/.bashrc")" = 1
+          node scripts/mcp-smoke.mjs "$h/.local/bin/consensus"
+          env -i PATH=/usr/bin:/bin HOME="$h" "$h/.local/bin/consensus" uninstall --all
+          test ! -e "$h/.local/bin/consensus"
+
   windows-installer:
     runs-on: windows-latest
     steps:
@@ -35,4 +77,27 @@ jobs:
           $tokens = $null; $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile("install.ps1", [ref]$tokens, [ref]$errors) | Out-Null
           if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
-      - run: node --version
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - name: bundle and package win-x64
+        run: |
+          node scripts/bundle.mjs
+          node scripts/package.mjs win x64
+          node scripts/package.mjs sums
+      - name: install.ps1 from a local release, twice (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          Start-Process python -ArgumentList "-m", "http.server", "8765", "--bind", "127.0.0.1", "--directory", "dist-release" -WindowStyle Hidden
+          Start-Sleep 3
+          $env:CONSENSUS_DOWNLOAD_BASE = "http://127.0.0.1:8765"
+          & ([scriptblock]::Create((Get-Content -Raw .\install.ps1))) -NoSetup
+          $launcher = Join-Path $env:LOCALAPPDATA "consensus\current\bin\consensus.cmd"
+          & $launcher --version
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          if (-not ([Environment]::GetEnvironmentVariable("Path", "User") -split ";" | Where-Object { $_ -like "*consensus\current\bin" })) { throw "user PATH not updated" }
+          & ([scriptblock]::Create((Get-Content -Raw .\install.ps1))) -NoSetup
+          node scripts/mcp-smoke.mjs $launcher
+          if ($LASTEXITCODE -ne 0) { exit 1 }

@@ -12,6 +12,70 @@ import { ConsensusEngine } from "./protocol/engine.js";
 import { renderReport } from "./report.js";
 import { saveRun } from "./store.js";
 import { G, progressLogger } from "./progress.js";
+import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
+import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { credentialsPath } from "./credentials.js";
+import { findReceipt, installKind } from "./install-receipt.js";
+import { onPath } from "./providers/index.js";
+const { version } = createRequire(import.meta.url)("../package.json");
+function tilde(path) {
+    const h = process.env.HOME || homedir();
+    return path === h ? "~" : path.startsWith(h + "/") || path.startsWith(h + "\\") ? `~${path.slice(h.length)}` : path;
+}
+/** The end-of-setup "what happened" screen: every row is something setup or the installer actually did. */
+export function setupSummary(i) {
+    const env = i.env ?? process.env;
+    const rows = [];
+    const kind = installKind(env, fileURLToPath(import.meta.url));
+    const inst = kind === "standalone" ? findReceipt(env) : undefined;
+    const onPathNow = onPath("consensus", env);
+    if (inst) {
+        rows.push(["Installed", `consensus ${inst.receipt?.version ?? version} (bundled Node ${process.versions.node}) in ${tilde(inst.root)}`]);
+        if (inst.receipt?.launcher)
+            rows.push(["Launcher", tilde(inst.receipt.launcher)]);
+        const rc = (inst.receipt?.rcFiles ?? []).map(tilde);
+        const hint = env.CONSENSUS_PATH_HINT;
+        if (onPathNow)
+            rows.push(["PATH", `on PATH${rc.length ? ` (${rc.join(", ")})` : ""}`]);
+        else if (rc.length) {
+            rows.push(["PATH", `new terminals: ${rc.join(", ")}`]);
+            rows.push(["This shell", (hint || `source ${tilde(inst.receipt?.envFile ?? "~/.consensus/env")}`).replace(/^this shell: /, "")]);
+        }
+        else
+            rows.push(["PATH", hint || `not on PATH: add ${tilde(inst.receipt?.binDir ?? "~/.local/bin")}`]);
+    }
+    else {
+        rows.push(["Installed", `consensus ${version} (${kind === "npm" ? "npm package" : kind === "archive" ? "release archive" : "source checkout"}, Node ${process.versions.node})`]);
+        rows.push(["PATH", onPathNow ? "consensus is on PATH" : "consensus is not on this shell's PATH"]);
+    }
+    const accounts = i.statuses.map((s) => `${s.connected ? G.ok : G.no} ${s.label}${s.connected ? (s.via === "cli" && s.cli ? ` via ${s.cli.name}` : " key") : ""}`);
+    rows.push(["Accounts", [0, 2, 4].map((k) => accounts.slice(k, k + 2).join("   ")).filter(Boolean).join("\n")]);
+    const names = Object.keys(i.cfg.profiles ?? {});
+    rows.push(["Profiles", names.length ? names.map((n) => (n === i.cfg.profile ? `${n} (default)` : n)).join(", ") : "none yet"]);
+    rows.push(["Config", tilde(i.cfgPath)]);
+    if (existsSync(credentialsPath()))
+        rows.push(["Keys", `${tilde(credentialsPath())} (mode 600)`]);
+    rows.push(["IDEs wired", i.wired.length ? i.wired.join(", ") : "none"]);
+    if (i.wired.length)
+        rows.push(["MCP command", i.mcpCommand.map((x) => tilde(x)).join(" ")]);
+    rows.push(["Telemetry", "none (there is no consensus server to send anything to)"]);
+    const width = Math.max(...rows.map(([k]) => k.length)) + 2;
+    const lines = rows.map(([k, v]) => `${k.padEnd(width)}${v.split("\n").join(`\n${" ".repeat(width)}`)}`);
+    lines.push("");
+    if (i.ready) {
+        lines.push(`Try:  consensus "Postgres SKIP LOCKED queue or Redis for our jobs?"`);
+        lines.push("      consensus doctor    consensus --help    consensus uninstall --all");
+    }
+    else {
+        const n = i.statuses.filter((s) => s.connected).length;
+        lines.push(`Not ready yet: ${n === 0 ? "no models connected" : `${n} model connected`}; a panel needs 2.`);
+        lines.push("Next: consensus connect openrouter  (one key seats every vendor)");
+        lines.push("  or: consensus connect <vendor>, then consensus doctor");
+    }
+    return lines.join("\n");
+}
 const SAMPLE_PROBLEM = "A small team is adding background jobs to a Node web app on Postgres. Should they start with a Postgres-backed queue (SKIP LOCKED) or adopt Redis/BullMQ from day one? Decide and justify in under 300 words.";
 /** Guided first debate: proves the install works and shows what a result looks like. */
 async function firstRun(cfg) {
@@ -60,26 +124,58 @@ export function statusLine(s) {
         how = s.cli.installed ? s.cli.detail : `${s.cli.name} not installed, no ${key}`;
     return `${mark} ${s.label.padEnd(20)} ${how}`;
 }
-function interactive(bin, args) {
-    const r = spawnSync(bin, args, { stdio: "inherit" });
+/** Vendor login/install commands get the terminal, but never forever (a browser login can wait indefinitely). */
+const INTERACTIVE_TIMEOUT_MS = 5 * 60_000;
+function interactive(bin, args, timeoutMs = INTERACTIVE_TIMEOUT_MS) {
+    const r = spawnSync(bin, args, { stdio: "inherit", timeout: timeoutMs });
+    if (r.error?.code === "ETIMEDOUT") {
+        p.log.warn(`\`${[bin, ...args].join(" ")}\` did not finish within ${Math.round(timeoutMs / 60_000)} minutes, so it was stopped. Run it yourself later, then \`consensus doctor\`.`);
+        return false;
+    }
+    if (r.error)
+        p.log.error(`Could not run ${bin}: ${r.error.message}`);
     return r.status === 0;
+}
+/** No browser to open: SSH sessions and Linux without a display. */
+export function isHeadless(env = process.env, platform = process.platform) {
+    if (env.SSH_CONNECTION || env.SSH_TTY)
+        return true;
+    return platform === "linux" && !env.DISPLAY && !env.WAYLAND_DISPLAY && !env.BROWSER;
+}
+/** The login command for a vendor CLI, switched to device-code auth when no browser can open. */
+export function loginArgs(cli, loginCommand, env = process.env, platform = process.platform) {
+    const args = loginCommand.split(" ").slice(1);
+    if (cli === "codex" && isHeadless(env, platform))
+        args.push("--device-auth");
+    return args;
+}
+/** Default choice when connecting a vendor: log in if its CLI is already there, otherwise paste a key. Installing a CLI is never the default. */
+export function defaultConnectChoice(s) {
+    return s.cli?.installed ? "login" : "key";
 }
 export async function connectVendor(s) {
     const cliInfo = s.cli ? PROVIDERS[s.cli.name] : undefined;
     const apiInfo = PROVIDERS[s.apiProvider];
     const options = [];
-    if (s.cli && cliInfo) {
-        if (s.cli.installed)
-            options.push({ value: "login", label: `Log in with ${s.cli.name} (${cliInfo.subscription})`, hint: cliInfo.loginCommand });
-        else if (cliInfo.installCommand?.startsWith("npm"))
-            options.push({ value: "install", label: `Install ${s.cli.name} and log in (${cliInfo.subscription})`, hint: cliInfo.installCommand });
-    }
+    if (s.cli && cliInfo && s.cli.installed)
+        options.push({ value: "login", label: `Log in with ${s.cli.name} (${cliInfo.subscription})`, hint: cliInfo.loginCommand });
     options.push({ value: "key", label: `Paste an API key (${apiInfo.envKey})`, hint: "stored in ~/.config/consensus/credentials.json, chmod 600" });
+    if (s.cli && cliInfo && !s.cli.installed && cliInfo.installCommand?.startsWith("npm")) {
+        options.push({ value: "install", label: `Install ${s.cli.name} and log in (${cliInfo.subscription})`, hint: `asks first: ${cliInfo.installCommand}` });
+    }
     options.push({ value: "skip", label: "Skip for now" });
-    const choice = await p.select({ message: `Connect ${s.label}`, options });
+    const choice = await p.select({ message: `Connect ${s.label}`, options, initialValue: defaultConnectChoice(s) });
     bail(choice);
     switch (choice) {
         case "install": {
+            if (!onPath("npm")) {
+                p.log.error(`npm is not on PATH, so ${s.cli.name} cannot be installed from here. Install it yourself (${cliInfo.installCommand}) or paste an API key instead.`);
+                return;
+            }
+            const sure = await p.confirm({ message: `Run \`${cliInfo.installCommand}\` now? (installs a global npm package)`, initialValue: false });
+            bail(sure);
+            if (!sure)
+                return;
             p.log.step(`Running: ${cliInfo.installCommand}`);
             if (!interactive("sh", ["-c", cliInfo.installCommand])) {
                 p.log.error("Install failed.");
@@ -88,11 +184,12 @@ export async function connectVendor(s) {
         }
         // fall through
         case "login": {
-            const loginArgs = cliInfo.loginCommand.split(" ").slice(1);
-            p.log.step(`Running: ${cliInfo.loginCommand}  (a browser window may open)`);
+            const args = loginArgs(s.cli.name, cliInfo.loginCommand);
+            const headless = args.includes("--device-auth");
+            p.log.step(`Running: ${cliInfo.bin} ${args.join(" ")}  ${headless ? "(device code: open the link it prints on any device)" : "(a browser window may open)"}`);
             if (s.cli.name === "gemini")
                 p.log.info("Gemini CLI logs in on first interactive run. Type /auth inside it if needed, then quit with /quit.");
-            interactive(cliInfo.bin, loginArgs);
+            interactive(cliInfo.bin, args);
             return;
         }
         case "key": {
@@ -107,6 +204,9 @@ export async function connectVendor(s) {
     }
 }
 export async function runSetup(o = {}) {
+    // Some pty wrappers report 0 columns, which makes clack print one character per line.
+    if (process.stdout.isTTY && !process.stdout.columns)
+        process.stdout.columns = 80;
     p.intro("consensus setup");
     const cfg = await loadUserConfig();
     // 1. Accounts ------------------------------------------------------------
@@ -118,13 +218,18 @@ export async function runSetup(o = {}) {
     if (statuses.some((x) => x.connected && x.via === "cli")) {
         p.log.warn("Subscription seats run your vendor CLIs headless: each debate spends the same rate limits as your interactive sessions (e.g. Claude Code's 5-hour and weekly caps). Anthropic's published terms restrict third-party products from relying on claude.ai logins; consensus is a local tool you run yourself, but read your plan's terms and prefer API keys for anything shared or automated.");
     }
-    if (!o.yes) {
-        for (const st of statuses.filter((x) => !x.connected)) {
-            const want = await p.confirm({ message: `Connect ${st.label}?`, initialValue: true });
-            bail(want);
-            if (want)
-                await connectVendor(st);
-        }
+    if (!o.yes && statuses.some((x) => !x.connected)) {
+        const missing = statuses.filter((x) => !x.connected);
+        // Pre-select only vendors whose CLI is already installed (a login away); nothing gets installed from this screen.
+        const pick = await p.multiselect({
+            message: "Connect more models now? (space toggles, enter continues; you can also do this later with `consensus connect`)",
+            options: missing.map((st) => ({ value: st.vendor, label: st.label, hint: st.cli?.installed ? `log in with ${st.cli.name}` : "API key" })),
+            initialValues: missing.filter((st) => st.cli?.installed).map((st) => st.vendor),
+            required: false,
+        });
+        bail(pick);
+        for (const st of missing.filter((x) => pick.includes(x.vendor)))
+            await connectVendor(st);
         s = p.spinner();
         s.start("Re-checking");
         statuses = await scanVendors(credentialEnv());
@@ -134,7 +239,7 @@ export async function runSetup(o = {}) {
     const connected = statuses.filter((x) => x.connected);
     const reachable = connected.some((x) => x.vendor === "openrouter") ? 4 : connected.length;
     if (reachable < 2) {
-        p.log.warn(`Only ${connected.length} vendor connected. A panel needs at least 2. Connect more with \`consensus connect <vendor>\`, or add an OpenRouter key to reach every vendor at once.`);
+        p.log.warn(`${connected.length === 0 ? "No models connected yet" : `Only ${connected.length} vendor connected`}. A panel needs at least 2. Connect more with \`consensus connect <vendor>\`, or add an OpenRouter key to reach every vendor at once.`);
     }
     if (o.probe && connected.length) {
         s = p.spinner();
@@ -152,6 +257,8 @@ export async function runSetup(o = {}) {
         if (add) {
             for (const [name, prof] of Object.entries(starters))
                 cfg.profiles[name] = prof;
+            cfg.profile ??= Object.keys(starters).includes("balanced") ? "balanced" : Object.keys(starters)[0];
+            await saveUserConfig(cfg); // saved now, so quitting a later question keeps the profiles
             p.log.success(`Profiles: ${Object.keys(starters).join(", ")}`);
         }
     }
@@ -190,7 +297,9 @@ export async function runSetup(o = {}) {
     }
     const cmd = mcpLaunchCommand();
     const lines = [];
+    const wired = [];
     for (const h of hosts.filter((x) => chosen.includes(x.id))) {
+        const before = lines.length;
         if (h.installMcp) {
             try {
                 lines.push(`${h.name}: MCP ${await h.installMcp(cmd)}`);
@@ -208,6 +317,8 @@ export async function runSetup(o = {}) {
                 lines.push(`${h.name}: skill failed: ${err.message}`);
             }
         }
+        if (lines.slice(before).some((l) => !l.includes(" failed: ")))
+            wired.push(h.id === "agents-standard" ? "~/.agents/skills" : h.name);
     }
     if (lines.length)
         p.note(lines.join("\n"), `Installed (MCP command: ${cmd.join(" ")})`);
@@ -232,5 +343,12 @@ export async function runSetup(o = {}) {
         p.log.info("No first debate under --yes (add --first-run to run one). Try: consensus \"…\" --profile fast");
     else if (o.firstRun === false)
         p.log.info("Skipped the first debate (--no-first-run).");
-    p.outro(`Done. Try:  consensus "Should we use optimistic locking or a distributed lock for inventory holds?"${cfg.profile ? `  (profile: ${cfg.profile})` : ""}`);
+    p.note(setupSummary({ statuses, cfg, cfgPath, wired, mcpCommand: cmd, ready: reachable >= 2 }), reachable >= 2 ? "You're set up" : "Installed, not ready yet");
+    if (reachable >= 2)
+        p.outro(`Done.${cfg.profile ? ` Default profile: ${cfg.profile}.` : ""}`);
+    else {
+        p.outro(`Connect ${connected.length === 0 ? "two models" : "one more model"}, then ask your first question.`);
+        if (o.yes)
+            process.exitCode = 3;
+    }
 }

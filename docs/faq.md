@@ -278,7 +278,8 @@ Technically yes; there are two things to get right.
 env:
   OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 steps:
-  - run: npm install -g https://github.com/seanheiney/consensus/archive/refs/heads/main.tar.gz
+  - run: curl -fsSL https://raw.githubusercontent.com/seanheiney/consensus/main/install.sh | sh -s -- --no-setup
+  - run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
   - run: consensus setup --yes --no-first-run
   - run: |
       consensus -f rfc.md --panel "openrouter:anthropic/claude-opus-5,openrouter:openai/gpt-5.6-sol,openrouter:x-ai/grok-4.5" \
