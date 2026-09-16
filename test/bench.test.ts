@@ -21,6 +21,9 @@ describe("bench", () => {
     expect(SAMPLE_SUITE.cases.some((c) => c.rubric && !c.expected)).toBe(true);
     expect(gradePrompt(SAMPLE_SUITE.cases[0]!, [{ label: "A", text: "60" }], "accuracy")).toContain("Reference answer (ground truth)");
     expect(gradePrompt(SAMPLE_SUITE.cases[4]!, [{ label: "A", text: "x" }], "quality")).toContain("QUALITY only");
+    // the rubric is the answer key for judgment cases: it must not reach the blind quality phase
+    expect(gradePrompt(SAMPLE_SUITE.cases[4]!, [{ label: "A", text: "x" }], "quality")).not.toContain("composite cursor");
+    expect(gradePrompt(SAMPLE_SUITE.cases[4]!, [{ label: "A", text: "x" }], "accuracy")).toContain("composite cursor");
   });
 
   it("runs profiles over cases, grades blind, and summarizes", async () => {
@@ -46,8 +49,9 @@ describe("bench", () => {
     expect(grader.calls).toHaveLength(4); // quality + accuracy per case
     expect(grader.calls[0]!.phase).toBe("grade");
     const md = renderBench(report);
-    expect(md).toContain("| good | 10.0/10 |");
-    expect(md).toContain("| bad | 0.0/10 |");
+    expect(md).toMatch(/\| good \| 2 \| 10\.0/);
+    expect(md).toMatch(/\| bad \| 2 \| 0\.0/);
+
   });
 
   it("grades only the answer section and supports trials", async () => {

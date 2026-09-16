@@ -55,6 +55,9 @@ export interface ProfileSummary {
     profile: string;
     cases: number;
     failures: number;
+    /** Sample standard deviation of quality / accuracy across graded runs. */
+    qualitySd: number | null;
+    accuracySd: number | null;
     convergedRate: number;
     avgMs: number;
     totalIn: number;
@@ -69,6 +72,7 @@ export interface BenchReport {
     startedAt: string;
     suite: string;
     grader: string;
+    seed?: number;
     results: CaseResult[];
     summaries: ProfileSummary[];
     /** Profiles that share a model vendor with the grader (self-preference risk). */
@@ -86,9 +90,9 @@ export declare function gradePrompt(c: BenchCase, answers: {
 export declare function gradeCase(grader: Panelist, c: BenchCase, answers: {
     key: string;
     text: string;
-}[]): Promise<Record<string, {
+}[], rnd?: () => number): Promise<Record<string, {
     accuracy: number | null;
-    quality: number;
+    quality: number | null;
     notes: string;
 }>>;
 /** The "# Answer" section of a synthesis, without the confidence/agreement framing. */
@@ -101,6 +105,8 @@ export interface BenchOptions {
     trials?: number;
     /** Run profiles concurrently (each profile's cases stay sequential). */
     parallel?: boolean;
+    /** Seed for grader shuffles (recorded in the report). */
+    seed?: number;
     outDir?: string;
     onEvent?: (e: {
         type: "case:start" | "case:done" | "grade:done";
@@ -111,6 +117,10 @@ export interface BenchOptions {
     engineEvents?: (profile: string, caseId: string, e: ConsensusEvent) => void;
 }
 export declare function runBench(o: BenchOptions): Promise<BenchReport>;
+/** Grade every case across arms in blind calls; mutates `results`. Exposed so a saved bench can be re-graded by another model. */
+export declare function gradeAll(suite: BenchSuite, results: CaseResult[], grader: Panelist, seed: number, onEvent?: BenchOptions["onEvent"]): Promise<void>;
+/** Re-grade a saved bench (results.json) with another grader without re-running any arm. */
+export declare function regradeBench(report: BenchReport, suite: BenchSuite, grader: Panelist, seed?: number): Promise<BenchReport>;
 export declare function summarize(profile: string, rs: CaseResult[]): ProfileSummary;
 export declare function renderBench(r: BenchReport): string;
 export declare function loadSuite(path: string): Promise<BenchSuite>;

@@ -79,11 +79,9 @@ export function starterProfiles(statuses) {
         const prof = materializePreset(preset, statuses);
         if (!prof)
             continue;
-        if (preset.shape === "per-vendor" && prof.panel.length > 1) {
-            const seat = prof.panel[i % prof.panel.length];
-            prof.judge = (typeof seat === "string" ? seat : seat.model).replace(/#\w+(?=\+|$)/, "");
-            i++;
-        }
+        // A judge that did not argue the case; falls back to a seat only when no other model can be seated.
+        prof.judge = "external:auto";
+        i++;
         out[preset.name] = prof;
     }
     return out;

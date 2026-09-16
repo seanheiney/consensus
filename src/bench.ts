@@ -103,6 +103,9 @@ export interface ProfileSummary {
   profile: string;
   cases: number;
   failures: number;
+  /** Sample standard deviation of quality / accuracy across graded runs. */
+  qualitySd: number | null;
+  accuracySd: number | null;
   convergedRate: number;
   avgMs: number;
   totalIn: number;
@@ -118,6 +121,7 @@ export interface BenchReport {
   startedAt: string;
   suite: string;
   grader: string;
+  seed?: number;
   results: CaseResult[];
   summaries: ProfileSummary[];
   /** Profiles that share a model vendor with the grader (self-preference risk). */
@@ -141,13 +145,24 @@ function vendorOf(panelistId: string): string | undefined {
   return undefined;
 }
 
-function shuffle<T>(arr: T[]): T[] {
+function shuffle<T>(arr: T[], rnd: () => number = Math.random): T[] {
   const a = arr.slice();
   for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rnd() * (i + 1));
     [a[i], a[j]] = [a[j]!, a[i]!];
   }
   return a;
+}
+
+function mulberry32(seed: number): () => number {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 // ---- grading ----------------------------------------------------------------
@@ -170,13 +185,12 @@ const GradeSchema = z.object({
 export function gradePrompt(c: BenchCase, answers: { label: string; text: string }[], phase: "quality" | "accuracy" = "accuracy"): string {
   const block = answers.map((a) => `### Answer ${a.label}\n\n${a.text.trim()}`).join("\n\n---\n\n");
   if (phase === "quality") {
-    return `You are grading answers to a problem for QUALITY only. Be strict, consistent, and blind to style. You are not told the correct answer; judge reasoning, completeness, specificity, honesty about limits, and absence of errors or padding.
+    return `You are grading answers to a problem for QUALITY only. Be strict, consistent, and blind to style. You are not told the correct answer or any rubric; judge reasoning, completeness, specificity, honesty about limits, and absence of errors or padding.
 
 ## Problem
 
 ${c.prompt}
 ${c.context ? `\n### Context\n\n${c.context}\n` : ""}
-${c.rubric ? `## Rubric\n\n${c.rubric}\n` : ""}
 ## Answers
 
 ${block}
@@ -187,15 +201,14 @@ For each answer give quality (0-10) and one sentence of notes.
 
 Respond with ONLY a JSON object: {"grades": [{"answer": "A", "quality": 7, "notes": "..."}, ...]} with one entry per answer.`;
   }
-  return `You are grading answers to a problem for ACCURACY against a reference. Be strict and consistent.
+  const key = c.expected ? `## Reference answer (ground truth)\n\n${c.expected}` : `## Rubric (what a strong answer must contain)\n\n${c.rubric}`;
+  return `You are grading answers to a problem for ACCURACY against ${c.expected ? "a reference answer" : "a rubric"}. Be strict and consistent.
 
 ## Problem
 
 ${c.prompt}
 ${c.context ? `\n### Context\n\n${c.context}\n` : ""}
-## Reference answer (ground truth)
-
-${c.expected}
+${key}
 
 ## Answers
 
@@ -203,7 +216,7 @@ ${block}
 
 ## Scoring
 
-For each answer give accuracy (0-10): 10 = fully correct and consistent with the reference; 0 = wrong conclusion. Partial credit only for partially correct conclusions, not for effort.
+For each answer give accuracy (0-10): 10 = ${c.expected ? "fully correct and consistent with the reference" : "meets every rubric point"}; 0 = ${c.expected ? "wrong conclusion" : "misses the rubric entirely"}. Partial credit only for partially correct conclusions, not for effort.
 
 Respond with ONLY a JSON object: {"grades": [{"answer": "A", "accuracy": 8}, ...]} with one entry per answer.`;
 }
@@ -212,10 +225,11 @@ export async function gradeCase(
   grader: Panelist,
   c: BenchCase,
   answers: { key: string; text: string }[],
-): Promise<Record<string, { accuracy: number | null; quality: number; notes: string }>> {
-  // Shuffle (Fisher-Yates) so the grader can't learn a profile order; a fresh order per phase.
+  rnd: () => number = Math.random,
+): Promise<Record<string, { accuracy: number | null; quality: number | null; notes: string }>> {
+  // Shuffle (Fisher-Yates, seeded) so the grader can't learn a profile order; a fresh order per phase.
   const ask = async (phase: "quality" | "accuracy") => {
-    const labeled = shuffle(answers).map((a, i) => ({ ...a, label: String.fromCharCode(65 + i) }));
+    const labeled = shuffle(answers, rnd).map((a, i) => ({ ...a, label: String.fromCharCode(65 + i) }));
     const res = await grader.complete({
       system: "You are a meticulous, impartial grader.",
       messages: [{ role: "user", content: gradePrompt(c, labeled, phase) }],
@@ -232,12 +246,12 @@ export async function gradeCase(
     return byKey;
   };
   const q = await ask("quality");
-  const acc = c.expected ? await ask("accuracy") : {};
-  const out: Record<string, { accuracy: number | null; quality: number; notes: string }> = {};
+  const acc = c.expected || c.rubric ? await ask("accuracy") : {};
+  const out: Record<string, { accuracy: number | null; quality: number | null; notes: string }> = {};
   for (const a of answers) {
     const qq = q[a.key];
-    if (!qq) continue;
-    out[a.key] = { accuracy: c.expected ? (acc[a.key]?.accuracy ?? null) : null, quality: qq.quality ?? 0, notes: qq.notes };
+    // A missing score stays null (excluded from averages), never 0.
+    out[a.key] = { accuracy: c.expected || c.rubric ? (acc[a.key]?.accuracy ?? null) : null, quality: qq?.quality ?? null, notes: qq?.notes ?? "" };
   }
   return out;
 }
@@ -258,6 +272,8 @@ export interface BenchOptions {
   trials?: number;
   /** Run profiles concurrently (each profile's cases stay sequential). */
   parallel?: boolean;
+  /** Seed for grader shuffles (recorded in the report). */
+  seed?: number;
   outDir?: string;
   onEvent?: (e: { type: "case:start" | "case:done" | "grade:done"; profile?: string; caseId: string; result?: CaseResult }) => void;
   engineEvents?: (profile: string, caseId: string, e: ConsensusEvent) => void;
@@ -329,13 +345,29 @@ export async function runBench(o: BenchOptions): Promise<BenchReport> {
   if (o.parallel) await Promise.all(o.profiles.map(runProfile));
   else for (const t of o.profiles) await runProfile(t);
 
-  // Grade each case across profiles in one blind call.
-  for (const c of o.suite.cases) {
+  const seed = o.seed ?? (Math.floor(Math.random() * 0xffffffff) >>> 0);
+  await gradeAll(o.suite, results, o.grader, seed, o.onEvent);
+  const summaries = o.profiles.map((t) => summarize(t.name, results.filter((r) => r.profile === t.name)));
+  const gv = vendorOf(o.grader.id);
+  const graderOverlap = gv ? o.profiles.filter((t) => (t.single ? [t.single] : t.panel).some((p) => vendorOf(p.id) === gv)).map((t) => t.name) : [];
+  const report: BenchReport = { startedAt, suite: o.suite.name ?? "suite", grader: o.grader.id, seed, results, summaries, graderOverlap };
+  if (o.outDir) {
+    await mkdir(o.outDir, { recursive: true });
+    await writeFile(join(o.outDir, "results.json"), JSON.stringify(report, null, 2));
+    await writeFile(join(o.outDir, "report.md"), renderBench(report));
+  }
+  return report;
+}
+
+/** Grade every case across arms in blind calls; mutates `results`. Exposed so a saved bench can be re-graded by another model. */
+export async function gradeAll(suite: BenchSuite, results: CaseResult[], grader: Panelist, seed: number, onEvent?: BenchOptions["onEvent"]): Promise<void> {
+  const rnd = mulberry32(seed);
+  for (const c of suite.cases) {
     const rs = results.filter((r) => r.caseId === c.id && r.ok && r.answer.trim());
     if (!rs.length) continue;
     try {
       const key = (r: CaseResult) => `${r.profile}#${r.trial}`;
-      const grades = await gradeCase(o.grader, c, rs.map((r) => ({ key: key(r), text: answerSection(r.answer) })));
+      const grades = await gradeCase(grader, c, rs.map((r) => ({ key: key(r), text: answerSection(r.answer) })), rnd);
       for (const r of rs) {
         const g = grades[key(r)];
         if (g) {
@@ -347,24 +379,34 @@ export async function runBench(o: BenchOptions): Promise<BenchReport> {
     } catch (err) {
       for (const r of rs) r.notes = `grading failed: ${(err as Error).message.split("\n")[0]}`;
     }
-    o.onEvent?.({ type: "grade:done", caseId: c.id });
+    onEvent?.({ type: "grade:done", caseId: c.id });
   }
+}
 
-  const summaries = o.profiles.map((t) => summarize(t.name, results.filter((r) => r.profile === t.name)));
-  const gv = vendorOf(o.grader.id);
-  const graderOverlap = gv ? o.profiles.filter((t) => (t.single ? [t.single] : t.panel).some((p) => vendorOf(p.id) === gv)).map((t) => t.name) : [];
-  const report: BenchReport = { startedAt, suite: o.suite.name ?? "suite", grader: o.grader.id, results, summaries, graderOverlap };
-  if (o.outDir) {
-    await mkdir(o.outDir, { recursive: true });
-    await writeFile(join(o.outDir, "results.json"), JSON.stringify(report, null, 2));
-    await writeFile(join(o.outDir, "report.md"), renderBench(report));
-  }
-  return report;
+/** Re-grade a saved bench (results.json) with another grader without re-running any arm. */
+export async function regradeBench(report: BenchReport, suite: BenchSuite, grader: Panelist, seed?: number): Promise<BenchReport> {
+  const results = report.results.map((r) => ({ ...r, accuracy: null, quality: null, notes: "" }));
+  const s = seed ?? report.seed ?? 1;
+  await gradeAll(suite, results, grader, s);
+  const names = [...new Set(results.map((r) => r.profile))];
+  const summaries = names.map((n) => summarize(n, results.filter((r) => r.profile === n)));
+  // Overlap is recomputed from arm names: single arms carry their spec; panel arms keep the original assessment only if the vendor is unchanged.
+  const gv = vendorOf(grader.id);
+  const sameVendorAsBefore = gv !== undefined && gv === vendorOf(report.grader);
+  const graderOverlap = names.filter((n) => (n.startsWith("single:") ? vendorOf(n.slice("single:".length)) === gv : sameVendorAsBefore && report.graderOverlap.includes(n)));
+  return { ...report, grader: grader.id, seed: s, results, summaries, graderOverlap };
 }
 
 function avg(xs: (number | null)[]): number | null {
   const v = xs.filter((x): x is number => x !== null);
   return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+}
+
+function sd(xs: (number | null)[]): number | null {
+  const v = xs.filter((x): x is number => x !== null);
+  if (v.length < 2) return null;
+  const m = v.reduce((a, b) => a + b, 0) / v.length;
+  return Math.sqrt(v.reduce((a, b) => a + (b - m) ** 2, 0) / (v.length - 1));
 }
 
 export function summarize(profile: string, rs: CaseResult[]): ProfileSummary {
@@ -374,6 +416,8 @@ export function summarize(profile: string, rs: CaseResult[]): ProfileSummary {
     profile,
     cases: rs.length,
     failures: rs.length - ok.length,
+    qualitySd: sd(ok.map((r) => r.quality)),
+    accuracySd: sd(ok.map((r) => r.accuracy)),
     convergedRate: ok.length ? ok.filter((r) => r.converged).length / ok.length : 0,
     avgMs: ok.length ? ok.reduce((a, r) => a + r.ms, 0) / ok.length : 0,
     totalIn: ok.reduce((a, r) => a + r.usage.inputTokens, 0),
@@ -392,16 +436,33 @@ export function renderBench(r: BenchReport): string {
   const lines: string[] = [
     `# Benchmark: ${r.suite}`,
     "",
-    `_${r.results.length} runs across ${r.summaries.length} arm${r.summaries.length === 1 ? "" : "s"}, graded blind by ${r.grader}. Cost is the equivalent API list price; subscription seats do not bill per token, and a seat that reports no usage is excluded and listed below, not counted as $0. Started ${r.startedAt}._`,
+    `_${r.results.length} runs across ${r.summaries.length} arm${r.summaries.length === 1 ? "" : "s"}, graded blind by ${r.grader}${r.seed !== undefined ? ` (grader shuffle seed ${r.seed})` : ""}. Quality is scored before the grader sees any reference or rubric; accuracy is scored against the reference (or the rubric for judgment cases). Cost is the equivalent API list price; subscription seats do not bill per token, and a seat that reports no usage is excluded and listed below, not counted as $0. Started ${r.startedAt}._`,
     ...(r.graderOverlap?.length ? ["", `**Grader bias warning:** the grader shares a model vendor with: ${r.graderOverlap.join(", ")}. LLM judges favour their own family; re-run with a grader from another vendor before trusting gaps involving these arms.`] : []),
     ...(r.summaries.some((s) => s.profile.startsWith("single:")) ? ["", "_Arms named `single:<model>` are baselines: one model answering once with no debate._"] : []),
     "",
-    "| Arm | Accuracy | Quality | Converged | Avg time | Tokens in / out | Billed (API) | Subscription equiv. | Failures |",
-    "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+    "| Arm | n | Accuracy (±sd) | Quality (±sd) | Converged | Avg time | Tokens in / out | Billed (API) | Subscription equiv. | Failures |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
   ];
   for (const s of r.summaries) {
     const conv = s.profile.startsWith("single:") ? "n/a" : `${Math.round(s.convergedRate * 100)}%`;
-    lines.push(`| ${s.profile} | ${f1(s.avgAccuracy, "/10")} | ${f1(s.avgQuality, "/10")} | ${conv} | ${(s.avgMs / 1000).toFixed(0)}s | ${s.totalIn.toLocaleString("en-US")} / ${s.totalOut.toLocaleString("en-US")} | ${usd(s.totalCostUsd)} | ${usd(s.totalSubscriptionUsd)} | ${s.failures} |`);
+    const pm = (v: number | null) => (v === null ? "" : ` ±${v.toFixed(1)}`);
+    lines.push(`| ${s.profile} | ${s.cases - s.failures} | ${f1(s.avgAccuracy)}${pm(s.accuracySd)} | ${f1(s.avgQuality)}${pm(s.qualitySd)} | ${conv} | ${(s.avgMs / 1000).toFixed(0)}s | ${s.totalIn.toLocaleString("en-US")} / ${s.totalOut.toLocaleString("en-US")} | ${usd(s.totalCostUsd)} | ${usd(s.totalSubscriptionUsd)} | ${s.failures} |`);
+  }
+  // Head-to-head: how often each panel arm beat each baseline on the same case+trial.
+  const singles = r.summaries.map((s) => s.profile).filter((n) => n.startsWith("single:"));
+  const panels = r.summaries.map((s) => s.profile).filter((n) => !n.startsWith("single:"));
+  if (singles.length && panels.length) {
+    lines.push("", "## Head-to-head (panel vs single model, same case and trial)", "", "| Panel | Baseline | Wins / ties / losses on quality | Wins / ties / losses on accuracy |", "|---|---|---:|---:|");
+    for (const pnl of panels) for (const sg of singles) {
+      let qw = 0, qt = 0, ql = 0, aw = 0, at = 0, al = 0;
+      for (const x of r.results.filter((y) => y.profile === pnl && y.ok)) {
+        const y = r.results.find((z) => z.profile === sg && z.caseId === x.caseId && z.trial === x.trial && z.ok);
+        if (!y) continue;
+        if (x.quality !== null && y.quality !== null) x.quality > y.quality ? qw++ : x.quality < y.quality ? ql++ : qt++;
+        if (x.accuracy !== null && y.accuracy !== null) x.accuracy > y.accuracy ? aw++ : x.accuracy < y.accuracy ? al++ : at++;
+      }
+      lines.push(`| ${pnl} | ${sg} | ${qw} / ${qt} / ${ql} | ${aw} / ${at} / ${al} |`);
+    }
   }
   lines.push("", "## Per case", "", "_Notes come from the blind grader, which sees every arm's answer for a case relabelled A, B, C…; those letters are the grader's, not the debate's seat labels._", "", "| Case | Arm | Accuracy | Quality | Converged | Rounds | Time | Billed | Sub. equiv. | Notes |", "|---|---|---:|---:|---:|---:|---:|---:|---:|---|");
   for (const x of r.results) {

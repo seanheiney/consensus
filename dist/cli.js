@@ -41,6 +41,14 @@ import { G, bold, dim, green, log, progressLogger, red, yellow } from "./progres
 import { preflight } from "./doctor.js";
 import { renderRunHtml } from "./store.js";
 import { materializePreset as _mp } from "./profiles.js";
+/** Rough wall-clock guess: per-phase latency scaled by effort, phases by rounds. */
+function estimateMinutes(seats, rounds, effort) {
+    const scale = effort === "max" ? 2 : effort === "xhigh" ? 1.6 : effort === "high" ? 1.2 : effort === "medium" ? 0.8 : 0.5;
+    const phases = 1 + rounds + (rounds > 1 ? rounds - 1 : 0) + 1; // propose, critiques, revisions, synthesis
+    const perPhaseSec = 30 * scale + seats * 3;
+    const total = phases * perPhaseSec;
+    return { low: Math.max(1, Math.round((total * 0.6) / 60)), high: Math.max(2, Math.round((total * 1.4) / 60)) };
+}
 function levenshtein(a, b) {
     const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
     for (let j = 1; j <= b.length; j++)
@@ -91,7 +99,9 @@ program
     .option("-r, --rounds <n>", "max critique/revise rounds", parseIntArg)
     .option("-e, --effort <level>", "low|medium|high|xhigh|max (default for models without their own #effort)", parseEffort)
     .option("--max-tokens <n>", "max output tokens per call", parseIntArg)
-    .option("--max-cost <usd>", "abort once the estimated API list-price spend exceeds this (subscription seats aren't counted)", (v) => { const n = Number(v); if (!(n > 0))
+    .option("--max-cost <usd>", "abort once spend billed to API keys exceeds this (subscription seats are quota, not counted); default from config maxCostUsd", (v) => { const n = Number(v); if (!(n > 0))
+    throw new InvalidArgumentError("must be a positive number"); return n; })
+    .option("--max-spend <usd>", "abort once billed spend plus the list-price equivalent of subscription seats exceeds this; default from config maxSpendUsd", (v) => { const n = Number(v); if (!(n > 0))
     throw new InvalidArgumentError("must be a positive number"); return n; })
     .option("--no-retry", "do not retry a seat once on a transient failure")
     .option("--timeout <minutes>", "kill any single model call after this many minutes (default 20)", (v) => { const n = Number(v); if (!(n > 0))
@@ -143,7 +153,10 @@ program
             log(yellow(`note: ${k} is set in your shell, so the ${p} seat will bill that API key, not your subscription`));
         log(dim(`panel${r.profile ? ` (${r.profile})` : ` (${r.source})`}: ${seats}`));
         const onPanel = r.panel.some((x) => x.id === r.judge.id);
-        log(dim(`judge: ${r.judge.id}${onPanel ? "" : " (external, did not debate)"}  rounds: ${r.rounds}  cost: ${cliSeats === r.panel.length ? "subscription quota" : cliSeats ? "subscription quota + API tokens" : "API tokens"}; roughly ${r.panel.length * (1 + 2 * r.rounds)} model calls at most${o.maxCost ? `; ceiling $${o.maxCost}` : ""}`));
+        const ceilings = [o.maxCost ?? cfg.maxCostUsd ? `billed ceiling $${o.maxCost ?? cfg.maxCostUsd}` : "", o.maxSpend ?? cfg.maxSpendUsd ? `total ceiling $${o.maxSpend ?? cfg.maxSpendUsd}` : ""].filter(Boolean).join(", ");
+        const est = estimateMinutes(r.panel.length, r.rounds, r.effort);
+        log(dim(`judge: ${r.judge.id}${onPanel ? "" : " (external, did not debate)"}  rounds: ${r.rounds}  cost: ${cliSeats === r.panel.length ? "subscription quota" : cliSeats ? "subscription quota + API tokens" : "API tokens"}; up to ${r.panel.length * (1 + 2 * r.rounds) + 1} model calls${ceilings ? `; ${ceilings}` : ""}`));
+        log(dim(`expect roughly ${est.low}–${est.high} minutes (seats run in parallel; each round adds a critique and, if anything is disputed, a revision)`));
     }
     const ac = new AbortController();
     process.once("SIGINT", () => {
@@ -185,7 +198,8 @@ program
         rounds: r.rounds,
         effort: r.effort,
         maxTokens: o.maxTokens ?? cfg.maxTokens,
-        maxCostUsd: o.maxCost,
+        maxCostUsd: o.maxCost ?? cfg.maxCostUsd,
+        maxSpendUsd: o.maxSpend ?? cfg.maxSpendUsd,
         retry: o.retry !== false,
         seed: o.seed,
         onEvent,
@@ -269,7 +283,8 @@ program
     .option("-y, --yes", "non-interactive: use what is already connected, create starter profiles, install everywhere detected")
     .option("--project", "also write project-level files in the current directory")
     .option("--probe", "make one tiny live call through each connection")
-    .option("--no-first-run", "skip the guided first debate at the end")
+    .option("--first-run", "under --yes, also run the guided first debate (spends quota); interactive setup asks")
+    .option("--no-first-run", "skip the guided first debate")
     .action((o) => runSetup(o));
 program
     .command("doctor")
@@ -774,6 +789,26 @@ bench
     });
     process.stdout.write((o.json ? JSON.stringify(report, null, 2) : renderBench(report)) + "\n");
     log(dim(`saved ${outDir}`));
+});
+bench
+    .command("regrade")
+    .argument("<dir>", "a saved bench directory (contains results.json)")
+    .requiredOption("-g, --grader <spec>", "grader model spec, ideally from a vendor not on the panels")
+    .option("-s, --suite <path>", "the suite the bench ran (default: consensus.bench.json here, else the starter suite)")
+    .option("--seed <n>", "grader shuffle seed (default: the original)", parseIntArg)
+    .description("re-grade a saved bench with another grader without re-running any arm; writes report-<grader>.md next to the original")
+    .action(async (dir, o) => {
+    const { regradeBench } = await import("./bench.js");
+    const report = JSON.parse(await readFile(join(dir, "results.json"), "utf8"));
+    const suite = o.suite ? await loadSuite(o.suite) : await loadSuite("consensus.bench.json").catch(() => SAMPLE_SUITE);
+    const grader = createPanelist(o.grader, { effort: "high", env: credentialEnv() });
+    log(dim(`re-grading ${report.results.length} runs with ${grader.id}…`));
+    const next = await regradeBench(report, suite, grader, o.seed);
+    const file = join(dir, `report-${grader.id.replace(/[^a-z0-9]+/gi, "-")}.md`);
+    await writeFile(file, renderBench(next));
+    await writeFile(join(dir, `results-${grader.id.replace(/[^a-z0-9]+/gi, "-")}.json`), JSON.stringify(next, null, 2));
+    process.stdout.write(renderBench(next) + "\n");
+    log(dim(`wrote ${file}`));
 });
 bench
     .command("init")

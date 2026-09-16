@@ -26,7 +26,8 @@ export function priceFor(panelistId: string): { input: number; output: number } 
  */
 const SUBSCRIPTION_PROVIDERS = new Set(["claude", "codex", "gemini", "grok"]);
 
-export function isSubscriptionSeat(panelistId: string): boolean {
+export function isSubscriptionSeat(panelistId: string, usage?: Usage): boolean {
+  if (usage?.billing) return usage.billing === "subscription";
   return SUBSCRIPTION_PROVIDERS.has(panelistId.split(":")[0]!.split("+")[0]!);
 }
 
@@ -59,7 +60,7 @@ export function estimateCost(usage: Record<string, Usage>): CostEstimate {
       unpriced.push(id);
       continue;
     }
-    if (isSubscriptionSeat(id)) {
+    if (isSubscriptionSeat(id, u)) {
       sub += c;
       anySub = true;
     } else {
@@ -82,8 +83,12 @@ export function describeCost(c: CostEstimate): string {
 export class CostLimitError extends Error {
   /** The run so far (no synthesis), when the engine could capture it. */
   partial?: import("./types.js").ConsensusRun;
-  constructor(public readonly spentUsd: number, public readonly limitUsd: number, public readonly phase: string) {
-    super(`Spend ceiling reached: ~$${spentUsd.toFixed(2)} billed to API keys after ${phase}, limit $${limitUsd.toFixed(2)} (--max-cost). Subscription seats are quota and are not counted.`);
+  constructor(public readonly spentUsd: number, public readonly limitUsd: number, public readonly phase: string, public readonly kind: "billed" | "total" = "billed") {
+    super(
+      kind === "billed"
+        ? `Spend ceiling reached: ~$${spentUsd.toFixed(2)} billed to API keys after ${phase}, limit $${limitUsd.toFixed(2)} (--max-cost). Subscription seats are quota and are not counted.`
+        : `Spend ceiling reached: ~$${spentUsd.toFixed(2)} at list price (billed + subscription-equivalent) after ${phase}, limit $${limitUsd.toFixed(2)} (--max-spend).`,
+    );
     this.name = "CostLimitError";
   }
 }

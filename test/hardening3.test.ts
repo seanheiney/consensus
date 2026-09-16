@@ -57,13 +57,17 @@ describe("judges", () => {
     const only = [status("anthropic", "claude", "cli"), status("openai", undefined), status("google", undefined), status("xai", undefined), status("openrouter", undefined)];
     const j2 = await autoExternalJudge(["claude:claude-opus-5+skeptic", "claude:claude-opus-5+teacher"], only);
     expect(j2).toMatch(/^claude:claude-(fable-5-1|sonnet-5|haiku-4-5)/);
-    await expect(autoExternalJudge(["claude:claude-fable-5-1", "claude:claude-opus-5", "claude:claude-sonnet-5", "claude:claude-haiku-4-5"], only)).rejects.toThrow(/external judge/);
+
   });
-  it("preset judges rotate across vendors instead of always the first seat", () => {
+  it("presets default to a judge that did not debate", () => {
     const st = [status("anthropic", "claude", "cli"), status("openai", "codex", "cli", "0.160.0"), status("google", "google", "api"), status("xai", "grok", "cli"), status("openrouter", undefined)];
     const profs = starterProfiles(st);
-    const judges = ["frontier", "balanced", "budget", "fast"].map((n) => profs[n]!.judge!.split(":")[0]);
-    expect(new Set(judges).size).toBeGreaterThan(1);
+    for (const n of ["frontier", "balanced", "budget", "fast"]) expect(profs[n]!.judge).toBe("external:auto");
+  });
+  it("external:auto falls back to the first seat only when nothing else can be seated", async () => {
+    const only = [status("anthropic", "claude", "cli"), status("openai", undefined), status("google", undefined), status("xai", undefined), status("openrouter", undefined)];
+    const j = await autoExternalJudge(["claude:claude-fable-5-1", "claude:claude-opus-5", "claude:claude-sonnet-5", "claude:claude-haiku-4-5"], only);
+    expect(j).toBe("claude:claude-fable-5-1");
   });
 });
 
@@ -82,5 +86,45 @@ describe("external:auto through resolveRun", () => {
     const r = await resolveRun({ cfg: {}, env, panel: ["anthropic:claude-opus-5", "openai:gpt-5.6-sol"], judge: "external:auto" });
     expect(r.panel.map((p) => p.id)).not.toContain(r.judge.id);
     expect(r.judge.id).toMatch(/^(anthropic|openai):/);
+  });
+});
+
+
+describe("revision fires whenever anything was disputed", () => {
+  it("round 1 with only minor disputes still revises, then converges in round 2", async () => {
+    let n = 0;
+    const minor = (req: CompletionRequest) => {
+      if (phaseOf(req) === "critique") {
+        n++;
+        const others = [...req.messages[0]!.content.matchAll(/### Answer (\w)/g)].map((m) => m[1]!).filter((l) => !req.messages[0]!.content.includes(`### Answer ${l} (this is YOUR answer)`));
+        return JSON.stringify({ self_review: { errors: [], gaps: [] }, reviews: others.map((answer) => ({ answer, verdict: "agree", strengths: ["ok"], disputes: n <= 2 ? [{ claim: "nit", problem: "typo", correction: "fix", severity: "minor" }] : [] })) });
+      }
+      if (phaseOf(req) === "revise") return JSON.stringify({ responses: [{ from: "B", claim: "nit", action: "concede", reason: "fair" }], position_changed: false, answer: "revised" });
+      return phaseOf(req) === "synthesize" ? "s" : "a";
+    };
+    const run = await new ConsensusEngine({ panel: [fakePanelist("a:m", minor), fakePanelist("b:m", minor)], rounds: 3 }).run("q");
+    expect(run.rounds).toHaveLength(2);
+    expect(run.rounds[0]!.converged).toBe(false);
+    expect(run.rounds[0]!.revisions).toBeDefined();
+    expect(run.converged).toBe(true);
+  });
+  it("a clean sheet (no disputes at all) still converges in round 1", async () => {
+    const run = await new ConsensusEngine({ panel: [fakePanelist("a:m", std("A")), fakePanelist("b:m", std("B"))], rounds: 3 }).run("q");
+    expect(run.rounds).toHaveLength(1);
+    expect(run.converged).toBe(true);
+  });
+});
+
+describe("spend ceilings", () => {
+  it("--max-spend counts subscription-equivalent spend; --max-cost does not", async () => {
+    const { CostLimitError } = await import("../src/cost.js");
+    const sub = (id: string) => {
+      const p = fakePanelist(id, std(id));
+      const inner = p.complete.bind(p);
+      p.complete = async (req) => ({ ...(await inner(req)), usage: { inputTokens: 1_000_000, outputTokens: 0 } });
+      return p;
+    };
+    await expect(new ConsensusEngine({ panel: [sub("claude:claude-opus-5"), sub("codex:gpt-5.6-sol")], maxCostUsd: 1 }).run("q")).resolves.toBeDefined();
+    await expect(new ConsensusEngine({ panel: [sub("claude:claude-opus-5"), sub("codex:gpt-5.6-sol")], maxSpendUsd: 1 }).run("q")).rejects.toBeInstanceOf(CostLimitError);
   });
 });

@@ -71,6 +71,8 @@ export declare const ConfigSchema: z.ZodObject<{
         xhigh: "xhigh";
     }>>;
     maxTokens: z.ZodOptional<z.ZodNumber>;
+    maxCostUsd: z.ZodOptional<z.ZodNumber>;
+    maxSpendUsd: z.ZodOptional<z.ZodNumber>;
     runsDir: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>;
 export type Config = z.infer<typeof ConfigSchema>;

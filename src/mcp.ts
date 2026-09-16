@@ -47,7 +47,8 @@ export function createMcpServer(): McpServer {
         "Send a hard question, design decision, or plan to a panel of independent frontier models (Claude, GPT, Grok, Gemini, ...). " +
         "They answer independently, critique each other adversarially, revise, and repeat until they agree. " +
         "Returns the panel's answer, confidence, unresolved disagreements, and where the full debate was saved. " +
-        "Slow: typically 1-4 minutes for 2-3 seats and one round, up to 10+ minutes for frontier profiles with 3 rounds; set client timeouts accordingly (progress notifications are sent when the client passes a progressToken). " +
+        "Slow: typically 1-4 minutes for 2-3 seats and one round, up to 10+ minutes for frontier profiles with 3 rounds; set client timeouts accordingly (progress notifications with a total are sent when the client passes a progressToken). " +
+        "It spends money or the user's own subscription quota (Claude Code / Codex rate limits): call it for decisions that matter, tell the user, and pass `max_cost` / `max_spend` when in doubt. " +
         "Put everything the panel needs in `prompt` and `context`; panelists cannot read files or the conversation.",
       inputSchema: {
         prompt: z.string().describe("The problem or question, fully self-contained."),
@@ -57,9 +58,12 @@ export function createMcpServer(): McpServer {
         rounds: z.number().int().min(1).max(10).optional().describe("Max critique/revise rounds (default from profile, else 3). 1 = critique only, no revision."),
         effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional().describe("Reasoning effort for seats without their own."),
         transcript: z.boolean().optional().describe("Return the full report and debate transcript instead of the short summary."),
+        max_cost: z.number().positive().optional().describe("Abort once spend billed to API keys exceeds this many USD (default from the user's config)."),
+        max_spend: z.number().positive().optional().describe("Abort once billed spend plus the list-price equivalent of subscription seats exceeds this many USD."),
       },
+      annotations: { title: "Panel consensus", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async ({ prompt, context, profile, panel, rounds, effort, transcript }, extra) => {
+    async ({ prompt, context, profile, panel, rounds, effort, transcript, max_cost, max_spend }, extra) => {
       const cfg = await loadConfig();
       const r = await resolveRun({ cfg, panel, profile, rounds, effort, env: credentialEnv() });
       const runsDir = cfg.runsDir ?? ".consensus/runs";
@@ -67,6 +71,8 @@ export function createMcpServer(): McpServer {
       let debate: Awaited<ReturnType<typeof openDebateLog>> | undefined;
       let pending: ConsensusEvent[] = [];
       let step = 0;
+      // phases + per-seat completions: a rough total so hosts can draw a bar, not just a spinner
+      const total = 1 + r.rounds * 2 + 1 + r.panel.length * (1 + 2 * r.rounds) + 2;
       const onEvent = (e: ConsensusEvent): void => {
         if (e.type === "start") {
           pending.push(e);
@@ -80,10 +86,10 @@ export function createMcpServer(): McpServer {
         const msg = progressMessage(e);
         if (msg && token !== undefined) {
           step++;
-          void extra.sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: step, message: msg } }).catch(() => undefined);
+          void extra.sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: Math.min(step, total - 1), total, message: msg } }).catch(() => undefined);
         }
       };
-      const engine = new ConsensusEngine({ panel: r.panel, judge: r.judge, rounds: r.rounds, effort: r.effort, maxTokens: cfg.maxTokens, onEvent, signal: extra.signal });
+      const engine = new ConsensusEngine({ panel: r.panel, judge: r.judge, rounds: r.rounds, effort: r.effort, maxTokens: cfg.maxTokens, maxCostUsd: max_cost ?? cfg.maxCostUsd, maxSpendUsd: max_spend ?? cfg.maxSpendUsd, onEvent, signal: extra.signal });
       const run = await engine.run(prompt, context);
       await debate?.close();
       let saved = "";
@@ -127,9 +133,11 @@ export function createMcpServer(): McpServer {
       inputSchema: {
         brief: z.string().describe("e.g. '5 panelists: a security expert, a distributed-systems engineer, a PM, a skeptic; frontier models; 3 rounds'"),
         name: z.string().optional().describe("Profile name; default chosen by the designer."),
+        overwrite: z.boolean().optional().describe("Replace an existing profile of the same name (default: a numbered name is chosen instead)."),
       },
+      annotations: { title: "Design a panel", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async ({ brief, name }) => {
+    async ({ brief, name, overwrite }) => {
       const { askDesigner, materializeDesign, TIER_WORDS } = await import("./designer.js");
       const { autoDetectSpecs, loadUserConfig, saveUserConfig } = await import("./config.js");
       const { createPanelist } = await import("./providers/index.js");
@@ -142,7 +150,12 @@ export function createMcpServer(): McpServer {
       const built = materializeDesign(design, statuses);
       if (built.profile.panel.length < 2) return { content: [{ type: "text", text: `Could not seat the panel: ${built.unseated.join("; ")}` }] };
       const cfg = await loadUserConfig();
-      const profileName = name ?? built.name;
+      let profileName = name ?? built.name;
+      if (cfg.profiles?.[profileName] && !overwrite) {
+        let n = 2;
+        while (cfg.profiles[`${profileName}-${n}`]) n++;
+        profileName = `${profileName}-${n}`;
+      }
       cfg.personas = { ...cfg.personas, ...built.personas };
       cfg.profiles = { ...cfg.profiles, [profileName]: built.profile };
       await saveUserConfig(cfg);
@@ -158,6 +171,7 @@ export function createMcpServer(): McpServer {
       title: "List consensus profiles and connections",
       description: "List the user's model profiles (which models sit on the panel for each) and which vendors are connected. Cheap; call before a long consensus run.",
       inputSchema: {},
+      annotations: { title: "List profiles", readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async () => {
       const cfg = await loadConfig();

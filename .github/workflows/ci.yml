@@ -20,6 +20,19 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - name: committed dist matches src
+        run: git diff --exit-code -- dist ':!dist/build-info.json' || (echo "dist/ is stale: run pnpm build and commit" && exit 1)
       - run: npm pack --dry-run
       - run: node dist/cli.js --help
       - run: node dist/cli.js bogus && exit 1 || true   # a bare word must be refused, never run
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install.ps1 parses
+        shell: pwsh
+        run: |
+          $tokens = $null; $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("install.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+      - run: node --version

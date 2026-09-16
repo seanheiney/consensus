@@ -230,13 +230,16 @@ export async function runSetup(o: SetupOptions = {}): Promise<void> {
     p.note(files.join("\n"), "Project files");
   }
 
-  if (o.firstRun !== false && reachable >= 2) {
+  // Under --yes nothing may spend quota without being asked for: the first debate needs an explicit --first-run.
+  const wantFirst = o.yes ? o.firstRun === true : o.firstRun !== false;
+  if (wantFirst && reachable >= 2) {
     let go: unknown = true;
     if (!o.yes) {
-      go = await p.confirm({ message: "Run a quick first debate now to see it work?", initialValue: true });
+      go = await p.confirm({ message: "Run a quick first debate now to see it work? (spends a little quota)", initialValue: true });
       bail(go);
     }
     if (go) await firstRun(cfg);
-  } else if (o.firstRun === false) p.log.info("Skipped the first debate (--no-first-run).");
+  } else if (o.yes && o.firstRun !== true) p.log.info("No first debate under --yes (add --first-run to run one). Try: consensus \"…\" --profile fast");
+  else if (o.firstRun === false) p.log.info("Skipped the first debate (--no-first-run).");
   p.outro(`Done. Try:  consensus "Should we use optimistic locking or a distributed lock for inventory holds?"${cfg.profile ? `  (profile: ${cfg.profile})` : ""}`);
 }

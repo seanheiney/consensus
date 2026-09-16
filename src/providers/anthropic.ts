@@ -24,9 +24,13 @@ function supportsFallbacks(model: string): boolean {
   return /^claude-(fable|opus-5|mythos)/.test(model);
 }
 
-/** Adaptive thinking + output_config.effort exist on Claude 4.6 and later; older models (Haiku 4.5, Sonnet 4.5, Opus 4.5 …) need budget_tokens and reject effort. */
+/**
+ * Adaptive thinking + output_config.effort exist on Claude 4.6 and later. Only the known
+ * pre-4.6 models (Haiku 4.5, Sonnet 4.5, Opus 4.5, 4.1, 3.x) need budget_tokens; anything
+ * unrecognised is assumed newer, so a model released after this code still gets the current API.
+ */
 function supportsAdaptive(model: string): boolean {
-  return /^claude-(fable|mythos|opus-5|sonnet-5|opus-4-[6-9]|sonnet-4-[6-9]|opus-4-\d\d|sonnet-4-\d\d)/.test(model);
+  return !/^claude-(haiku-4-5|sonnet-4-5|opus-4-5|opus-4-1|sonnet-4-1|3-|.*-3-)/.test(model);
 }
 
 export function createAnthropicPanelist(opts: ProviderFactoryOptions): Panelist {
@@ -38,6 +42,8 @@ export function createAnthropicPanelist(opts: ProviderFactoryOptions): Panelist 
     provider: "anthropic",
     model,
     effort: opts.effort,
+    billing: "api",
+    effortApplied: (e) => (supportsAdaptive(model) ? EFFORT[e] : "ignored"),
     async complete(req: CompletionRequest): Promise<CompletionResult> {
       const effort = EFFORT[opts.effort ?? req.effort ?? "high"];
       const fallbacks = supportsFallbacks(model);
@@ -46,9 +52,13 @@ export function createAnthropicPanelist(opts: ProviderFactoryOptions): Panelist 
       const build = (structured: boolean): Anthropic.Beta.MessageCreateParamsStreaming => ({
         model,
         max_tokens: maxTokens,
-        // The system prompt is identical for every phase of a run: cache it.
-        system: [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
-        messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
+        system: req.system,
+        // The problem + context prefix is identical across every phase and seat of a run: that is the block worth caching.
+        messages: req.messages.map((m) =>
+          m.role === "user" && m.cachedPrefix && m.content.startsWith(m.cachedPrefix)
+            ? { role: m.role, content: [{ type: "text" as const, text: m.cachedPrefix, cache_control: { type: "ephemeral" as const } }, { type: "text" as const, text: m.content.slice(m.cachedPrefix.length) }] }
+            : { role: m.role, content: m.content },
+        ),
         stream: true,
         ...(adaptive
           ? {

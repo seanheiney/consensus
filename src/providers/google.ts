@@ -12,6 +12,8 @@ export function createGooglePanelist(opts: ProviderFactoryOptions): Panelist {
     provider: "google",
     model,
     effort: opts.effort,
+    billing: "api",
+    effortApplied: () => "ignored",
     async complete(req: CompletionRequest): Promise<CompletionResult> {
       const res = await ai.models.generateContent({
         model,

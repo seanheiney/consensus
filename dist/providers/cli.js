@@ -81,6 +81,10 @@ function pickText(obj) {
 // Claude Code  (`claude -p`)  — Claude Pro/Max subscription or Console login
 // ---------------------------------------------------------------------------
 const CLAUDE_EFFORT = { low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" };
+/** Claude Code only accepts --effort on models that support it; Haiku 4.5 and older 4.5-era models ignore or reject it. */
+function claudeTakesEffort(model) {
+    return !model || !/haiku-4-5|sonnet-4-5|opus-4-5|-4-1|-3-/.test(model);
+}
 export function createClaudeCliPanelist(opts = {}) {
     const bin = opts.bin ?? "claude";
     return {
@@ -88,6 +92,8 @@ export function createClaudeCliPanelist(opts = {}) {
         provider: "claude",
         model: opts.model ?? "default",
         effort: opts.effort,
+        billing: process.env.ANTHROPIC_API_KEY ? "api" : "subscription",
+        effortApplied: (e) => (claudeTakesEffort(opts.model) ? CLAUDE_EFFORT[e] : "ignored"),
         async complete(req) {
             const effort = CLAUDE_EFFORT[opts.effort ?? req.effort ?? "high"];
             // Clean room: no built-in tools, no settings files, no CLAUDE.md / skills /
@@ -102,8 +108,9 @@ export function createClaudeCliPanelist(opts = {}) {
                 "--strict-mcp-config",
                 "--mcp-config", '{"mcpServers":{}}',
                 "--system-prompt", req.system,
-                "--effort", effort,
             ];
+            if (claudeTakesEffort(opts.model))
+                args.push("--effort", effort);
             if (opts.model)
                 args.push("--model", opts.model);
             if (req.jsonSchema)
@@ -130,9 +137,10 @@ export function createClaudeCliPanelist(opts = {}) {
             const u = parsed.usage;
             // Claude Code reports its own list-price cost (total_cost_usd); prefer it over re-deriving.
             const costUsd = typeof parsed.total_cost_usd === "number" ? parsed.total_cost_usd : undefined;
+            // input_tokens alone is tiny under Claude Code because most of the prompt is cache-written or cache-read.
             return {
                 text: parsed.result,
-                usage: u ? { inputTokens: u.input_tokens ?? 0, outputTokens: u.output_tokens ?? 0, cacheReadTokens: u.cache_read_input_tokens ?? 0, costUsd } : undefined,
+                usage: u ? { inputTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), outputTokens: u.output_tokens ?? 0, cacheReadTokens: u.cache_read_input_tokens ?? 0, costUsd } : undefined,
             };
         },
     };
@@ -148,6 +156,8 @@ export function createCodexCliPanelist(opts = {}) {
         provider: "codex",
         model: opts.model ?? "default",
         effort: opts.effort,
+        billing: process.env.OPENAI_API_KEY ? "api" : "subscription",
+        effortApplied: (e) => CODEX_EFFORT[e],
         async complete(req) {
             const effort = CODEX_EFFORT[opts.effort ?? req.effort ?? "high"];
             return withTempDir(async (cwd) => {
@@ -225,6 +235,8 @@ export function createGeminiCliPanelist(opts = {}) {
         provider: "gemini",
         model: opts.model ?? "default",
         effort: opts.effort,
+        billing: process.env.GEMINI_API_KEY ? "api" : "subscription",
+        effortApplied: () => "ignored",
         async complete(req) {
             // Clean room: plan (read-only) mode, and no MCP servers (an allow-list naming none).
             const args = ["-p", "Respond to the request above.", "-o", "json", "--approval-mode", "plan", "--allowed-mcp-server-names", "__consensus_none__"];
@@ -279,6 +291,8 @@ export function createGrokCliPanelist(opts = {}) {
         provider: "grok",
         model: opts.model ?? "default",
         effort: opts.effort,
+        billing: process.env.XAI_API_KEY ? "api" : "subscription",
+        effortApplied: (e) => GROK_EFFORT[e],
         async complete(req) {
             const effort = GROK_EFFORT[opts.effort ?? req.effort ?? "high"];
             return withTempDir(async (cwd) => {

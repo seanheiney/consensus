@@ -13,6 +13,8 @@ export class TransientError extends Error {
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  /** A leading slice of `content` that is identical across phases (problem + context); providers may cache it. */
+  cachedPrefix?: string;
 }
 
 export interface CompletionRequest {
@@ -38,6 +40,8 @@ export interface Usage {
   costUsd?: number;
   /** Internal: set once any real usage was recorded for this seat. */
   reported?: boolean;
+  /** Billed per token (API key) or subscription quota. Set by the engine from the seat. */
+  billing?: "api" | "subscription";
 }
 
 export interface CompletionResult {
@@ -59,6 +63,10 @@ export interface Panelist {
   effort?: Effort;
   /** Persona name when this seat carries a preprompt. */
   persona?: string;
+  /** How this seat is paid for. CLI seats are subscription unless the vendor's API key is in the shell. */
+  billing?: "api" | "subscription";
+  /** The provider's mapping of an effort level to what it actually sends. */
+  effortApplied?(effort: Effort): string;
   complete(req: CompletionRequest): Promise<CompletionResult>;
 }
 
@@ -68,7 +76,11 @@ export interface Seat {
   provider: string;
   model: string;
   effort?: Effort;
+  /** What the provider actually sent for that effort ("high", "xhigh", or "ignored" for routes with no effort knob). */
+  effortApplied?: string;
   persona?: string;
+  /** Whether this seat's usage is billed per token (API key) or consumes subscription quota. */
+  billing?: "api" | "subscription";
 }
 
 export interface Dispute {
@@ -119,13 +131,15 @@ export interface RoundRecord {
 }
 
 export interface ConsensusRun {
+  /** Bump when the shape of this record changes. */
+  schemaVersion: 1;
   id: string;
   startedAt: string;
   finishedAt?: string;
   prompt: string;
   context?: string;
   /** Run-level settings. Per-seat effort lives in `seats`. */
-  options: { rounds: number; defaultEffort: Effort; maxCostUsd?: number; seed?: number };
+  options: { rounds: number; defaultEffort: Effort; maxCostUsd?: number; maxSpendUsd?: number; seed?: number };
   labels: Record<string, string>; // label -> panelist id
   /** What actually sat on the panel: model, effort and persona per seat. */
   seats: Seat[];
@@ -164,8 +178,10 @@ export interface ConsensusOptions {
   rounds?: number;
   effort?: Effort;
   maxTokens?: number;
-  /** Abort the run once the estimated list-price spend exceeds this (unpriced seats excluded). */
+  /** Abort once spend billed to API keys exceeds this (subscription seats are quota and are not counted). */
   maxCostUsd?: number;
+  /** Abort once billed spend plus the list-price equivalent of subscription seats exceeds this. */
+  maxSpendUsd?: number;
   /** Retry a seat once on a transient failure (rate limit, overload, timeout). Default true. */
   retry?: boolean;
   /** Seed for label assignment and answer ordering; recorded in run.json so a run's shuffles are reproducible. */

@@ -134,7 +134,7 @@ export function materializeDesign(d: Design, statuses: VendorStatus[]): Material
     description: d.description,
     panel,
     rounds: d.rounds,
-    judge: d.judge === "external" ? "external:auto" : panel[0]?.replace(/#\w+(?=\+|$)/, ""),
+    judge: d.judge === "seat" && panel[0] ? panel[0].replace(/#\w+(?=\+|$)/, "") : "external:auto",
   };
   const distinctModels = new Set(panel.map((m) => m.split("+")[0]!.replace(/#\w+$/, "")));
   if (panel.length > 1 && vendors.length < panel.length && distinctModels.size < panel.length) {

@@ -6,6 +6,7 @@ It runs on the **AI subscriptions you already pay for** (Claude Pro/Max, ChatGPT
 *Subscription seats spend the same rate limits as your interactive use of those CLIs, and vendors' terms govern that use — Anthropic's terms restrict third-party products from relying on claude.ai logins. [Read this before you rely on it.](docs/faq.md#does-it-use-my-subscription-and-am-i-allowed-to-do-that)*
 
 ```
+# illustrative transcript: a 3-round debate that revises once and converges
 $ consensus "Optimistic locking or a distributed lock for inventory holds?"
 
 panel (balanced): claude:claude-opus-5#high, codex:gpt-5.6-sol#high, grok:grok-4.5#high, gemini:gemini-3.8-flash#high

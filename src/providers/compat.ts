@@ -39,6 +39,8 @@ export function createCompatPanelist(opts: CompatOptions): Panelist {
     provider: opts.provider,
     model,
     effort: opts.effort,
+    billing: "api",
+    effortApplied: (e) => (!opts.reasoning ? "ignored" : opts.provider === "xai" && !/mini/.test(model) ? "ignored" : EFFORT[e]),
     async complete(req: CompletionRequest): Promise<CompletionResult> {
       const effort = EFFORT[opts.effort ?? req.effort ?? "high"];
       // Reasoning knobs differ per gateway: xAI accepts `reasoning_effort` only on its mini models,

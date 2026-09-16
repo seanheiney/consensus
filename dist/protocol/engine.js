@@ -1,7 +1,7 @@
 import { TransientError } from "../types.js";
 import { extractJson } from "./json.js";
 import { CritiqueSchema, RevisionSchema } from "./schemas.js";
-import { SYSTEM_PROMPT, critiquePrompt, proposePrompt, revisePrompt, synthesizePrompt } from "./prompts.js";
+import { SYSTEM_PROMPT, critiquePrompt, problemBlock, proposePrompt, revisePrompt, synthesizePrompt } from "./prompts.js";
 import { z } from "zod";
 import { CostLimitError, describeCost, estimateCost } from "../cost.js";
 const TRANSIENT = /429|rate.?limit|overloaded|529|503|timeout|timed out|ECONNRESET|EPIPE|temporar|try again|SIGTERM/i;
@@ -95,11 +95,12 @@ export class ConsensusEngine {
             active: true,
         }));
         const run = {
+            schemaVersion: 1,
             id: newRunId(),
             startedAt: new Date().toISOString(),
             prompt,
             context,
-            options: { rounds, defaultEffort: effort, maxCostUsd: this.opts.maxCostUsd, seed },
+            options: { rounds, defaultEffort: effort, maxCostUsd: this.opts.maxCostUsd, maxSpendUsd: this.opts.maxSpendUsd, seed },
             labels: Object.fromEntries(states.map((s) => [s.label, s.panelist.id])),
             seats: states.map((s) => ({
                 id: s.panelist.id,
@@ -107,7 +108,9 @@ export class ConsensusEngine {
                 provider: s.panelist.provider,
                 model: s.panelist.model,
                 effort: s.panelist.effort ?? effort,
+                effortApplied: s.panelist.effortApplied?.(s.panelist.effort ?? effort),
                 persona: s.panelist.persona,
+                billing: s.panelist.billing,
             })),
             proposals: {},
             rounds: [],
@@ -123,7 +126,7 @@ export class ConsensusEngine {
         // ---- Phase 1: independent proposals -------------------------------
         this.emit({ type: "phase", phase: "propose" });
         await this.forEachActive(states, "propose", async (s) => {
-            const res = await this.call(s, [{ role: "user", content: proposePrompt(prompt, context) }], "propose");
+            const res = await this.call(s, [{ role: "user", content: proposePrompt(prompt, context), cachedPrefix: problemBlock(prompt, context) }], "propose");
             s.answer = res.trim();
             this.emit({ type: "proposal", label: s.label, panelist: s.panelist.id, text: s.answer, reasoning: s.reasoning });
         });
@@ -138,7 +141,7 @@ export class ConsensusEngine {
             const critiques = {};
             await this.forEachActive(states, `critique:${round}`, async (s) => {
                 // Each critic sees the answers in its own order (position bias mitigation); labels are unchanged.
-                const c = await this.callJson(s, [{ role: "user", content: critiquePrompt({ prompt, context, round, answers: this.reorder(answers), own: s.label }) }], CritiqueSchema, "critique");
+                const c = await this.callJson(s, [{ role: "user", content: critiquePrompt({ prompt, context, round, answers: this.reorder(answers), own: s.label }), cachedPrefix: problemBlock(prompt, context) }], CritiqueSchema, "critique");
                 // Drop reviews of labels that no longer exist / self-reviews by mistake.
                 c.reviews = c.reviews.filter((r) => r.answer !== s.label && r.answer in answers);
                 critiques[s.label] = c;
@@ -154,7 +157,10 @@ export class ConsensusEngine {
             const liveLabels = new Set(this.active(states).map((s) => s.label));
             for (const c of Object.values(critiques))
                 c.reviews = c.reviews.filter((r) => liveLabels.has(r.answer));
-            const converged = this.isConverged(critiques, liveLabels);
+            // Round 1 with any dispute at all (even minor) goes through revise once, so corrections are
+            // actually incorporated; convergence on first critique requires a clean sheet.
+            const anyDispute = Object.values(critiques).some((c) => c.reviews.some((r) => r.disputes.length > 0));
+            const converged = this.isConverged(critiques, liveLabels) && (round > 1 || !anyDispute || round === rounds);
             const record = { round, critiques, converged };
             run.rounds.push(record);
             lastCritiques = critiques;
@@ -170,7 +176,7 @@ export class ConsensusEngine {
             this.emit({ type: "phase", phase: "revise", round });
             const revisions = {};
             await this.forEachActive(states, `revise:${round}`, async (s) => {
-                const r = await this.callJson(s, [{ role: "user", content: revisePrompt({ prompt, context, round, answers: this.reorder(answers), critiques, own: s.label }) }], RevisionSchema, "revise");
+                const r = await this.callJson(s, [{ role: "user", content: revisePrompt({ prompt, context, round, answers: this.reorder(answers), critiques, own: s.label }), cachedPrefix: problemBlock(prompt, context) }], RevisionSchema, "revise");
                 revisions[s.label] = r;
                 s.answer = r.answer.trim();
                 this.emit({ type: "revision", label: s.label, panelist: s.panelist.id, round, revision: r });
@@ -221,7 +227,7 @@ export class ConsensusEngine {
         this.emit({ type: "synthesis", panelist: synthesizer.panelist.id, text: run.synthesis });
         for (const s of states)
             if (s.usage.reported)
-                run.usage[s.panelist.id] = { ...s.usage, reported: undefined };
+                run.usage[s.panelist.id] = { ...s.usage, reported: undefined, billing: s.panelist.billing };
         const c = estimateCost(run.usage);
         run.cost = { billedUsd: c.usd, subscriptionEquivUsd: c.subscriptionEquivUsd, unpriced: c.unpriced, summary: describeCost(c) };
         run.finishedAt = new Date().toISOString();
@@ -299,19 +305,21 @@ export class ConsensusEngine {
         this.checkCost(states, phase);
     }
     checkCost(states, phase) {
-        const limit = this.opts.maxCostUsd;
-        if (limit === undefined)
+        if (this.opts.maxCostUsd === undefined && this.opts.maxSpendUsd === undefined)
             return;
-        const usage = Object.fromEntries(states.map((s) => [s.panelist.id, s.usage]));
-        const { usd } = estimateCost(usage);
-        if (usd !== null && usd > limit) {
-            const err = new CostLimitError(usd, limit, phase);
+        const usage = Object.fromEntries(states.map((s) => [s.panelist.id, { ...s.usage, billing: s.panelist.billing }]));
+        const { usd, subscriptionEquivUsd } = estimateCost(usage);
+        const billed = usd ?? 0;
+        const total = billed + (subscriptionEquivUsd ?? 0);
+        const over = this.opts.maxCostUsd !== undefined && billed > this.opts.maxCostUsd ? { spent: billed, limit: this.opts.maxCostUsd, kind: "billed" } : this.opts.maxSpendUsd !== undefined && total > this.opts.maxSpendUsd ? { spent: total, limit: this.opts.maxSpendUsd, kind: "total" } : undefined;
+        if (over) {
+            const err = new CostLimitError(over.spent, over.limit, phase, over.kind);
             // Hand back what exists so the caller can save the partial debate instead of losing it.
             if (this.current) {
                 this.current.finalAnswers = this.answers(states);
                 for (const s of states)
                     if (s.usage.reported)
-                        this.current.usage[s.panelist.id] = { ...s.usage, reported: undefined };
+                        this.current.usage[s.panelist.id] = { ...s.usage, reported: undefined, billing: s.panelist.billing };
                 this.current.finishedAt = new Date().toISOString();
                 err.partial = this.current;
             }

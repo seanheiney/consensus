@@ -54,6 +54,9 @@ export const ConfigSchema = z.object({
     rounds: z.number().int().min(1).max(10).optional(),
     effort: EffortSchema.optional(),
     maxTokens: z.number().int().positive().optional(),
+    /** Default spend ceilings applied to every run (CLI and MCP) unless overridden. */
+    maxCostUsd: z.number().positive().optional(),
+    maxSpendUsd: z.number().positive().optional(),
     runsDir: z.string().optional(),
 });
 export const CONFIG_FILENAMES = ["consensus.config.json", ".consensusrc.json"];
@@ -214,7 +217,12 @@ export async function autoExternalJudge(members, statuses) {
                 return pick.spec("high");
         }
     }
-    throw new Error("No model is available for an external judge that is not already on the panel; connect another vendor or name a judge explicitly.");
+    // Nothing else can be seated: the first seat judges (the report says so).
+    const first = members[0];
+    if (!first)
+        throw new Error("No model is available for an external judge; connect another vendor or name a judge explicitly.");
+    const { spec } = splitMember(first);
+    return spec.replace(/#\w+$/, "");
 }
 const PROVIDERS_VENDOR = { claude: "anthropic", codex: "openai", gemini: "google", grok: "xai", anthropic: "anthropic", openai: "openai", google: "google", xai: "xai" };
 /**
@@ -268,8 +276,13 @@ export async function resolveRun(o) {
             return spec;
         const ext = spec.startsWith("external:");
         let bare = ext ? spec.slice("external:".length) : spec;
-        if (ext && bare === "auto")
+        if (ext && bare === "auto") {
             bare = await autoExternalJudge(members ?? [], await scan());
+            // If auto fell back to a seat that is on the panel, it is not external any more.
+            const onPanel = (members ?? []).some((m) => splitMember(m).spec.replace(/#\w+$/, "") === bare.replace(/#\w+$/, ""));
+            if (onPanel)
+                return bare;
+        }
         if (bare.startsWith("any:")) {
             const [m] = resolvePortableMembers([bare], await scan());
             bare = typeof m === "string" ? m : m.model;

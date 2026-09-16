@@ -26,8 +26,9 @@ function isReasoningModel(model: string): boolean {
 
 /** OpenAI via the Responses API. */
 export function createOpenAIPanelist(opts: ProviderFactoryOptions): Panelist {
+  // A missing key must not throw at construction: pre-flight reports it with the fix instead.
   const client = new OpenAI({
-    ...(opts.apiKey ? { apiKey: opts.apiKey } : {}),
+    apiKey: opts.apiKey ?? process.env.OPENAI_API_KEY ?? "missing",
     ...(opts.baseURL ? { baseURL: opts.baseURL } : {}),
   });
   const model = opts.model;
@@ -37,6 +38,8 @@ export function createOpenAIPanelist(opts: ProviderFactoryOptions): Panelist {
     provider: "openai",
     model,
     effort: opts.effort,
+    billing: "api",
+    effortApplied: (e) => (isReasoningModel(model) ? String(EFFORT[e]) : "ignored"),
     async complete(req: CompletionRequest): Promise<CompletionResult> {
       const effort = EFFORT[opts.effort ?? req.effort ?? "high"];
       const build = (structured: boolean): OpenAI.Responses.ResponseCreateParamsNonStreaming => ({

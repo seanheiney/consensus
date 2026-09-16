@@ -11,7 +11,7 @@ Ground rules:
 - Distinguish substance from style. Different wording, structure, or emphasis is not a disagreement. Different conclusions, recommendations, facts, or reasoning are.
 - Do not mention which company or model you are. Panelists are anonymous.`;
 
-function problemBlock(prompt: string, context?: string): string {
+export function problemBlock(prompt: string, context?: string): string {
   const parts = [`## Problem\n\n${prompt.trim()}`];
   if (context?.trim()) {
     parts.push(
@@ -58,7 +58,7 @@ ${answersBlock(args.answers, args.own)}
 
 Examine every answer other than your own (${others.join(", ")}) adversarially. Your job is to find where each one is wrong. Look hard: check facts, check the logic, look for missing cases, unstated assumptions, and recommendations that would fail in practice. Then:
 
-1. For each other answer, give a verdict. "agree" means its conclusions and recommendations are substantively equivalent to yours, and you found no major error in it. "disagree" means it differs from yours on something that matters, or contains a major error. If you cannot find a flaw after looking hard, say "agree" and list its strengths.
+1. For each other answer, give a verdict. "agree" means you would sign that answer as your own: its conclusions and recommendations are substantively equivalent to yours, it is complete, and you found no error. "disagree" means it differs from yours on something that matters, omits something a reader would need, or contains an error. Agreement is not the default; a verdict of "agree" with zero disputes is a strong claim, so before giving it, write down the single strongest objection you considered and why it does not hold (put it in "strengths" prefixed with "Strongest objection considered:").
 2. List concrete disputes. Each dispute names a specific claim, explains what is wrong with it, says what is right instead, and rates severity. A dispute must be falsifiable: someone reading it should be able to check who is right. Stylistic differences are not disputes.
 3. Review your own answer with the same rigor. List errors and gaps you now see in it, including things other answers got right that you missed.
 

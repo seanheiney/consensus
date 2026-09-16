@@ -67,6 +67,8 @@ export function withPersona(panelist, persona) {
         model: panelist.model,
         effort: panelist.effort,
         persona: persona.name,
+        billing: panelist.billing,
+        effortApplied: panelist.effortApplied?.bind(panelist),
         async complete(req) {
             if (req.phase === "synthesize")
                 return panelist.complete(req);

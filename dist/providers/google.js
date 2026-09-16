@@ -8,6 +8,8 @@ export function createGooglePanelist(opts) {
         provider: "google",
         model,
         effort: opts.effort,
+        billing: "api",
+        effortApplied: () => "ignored",
         async complete(req) {
             const res = await ai.models.generateContent({
                 model,
