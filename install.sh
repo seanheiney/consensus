@@ -22,8 +22,9 @@
 # Never runs as root. Writes only under ~/.consensus, ~/.local/bin and the rc files
 # it lists. No telemetry. Every file is listed in ~/.consensus/receipt.json.
 #
-# While no release has been published yet, it falls back to the previous method:
-# Node 22+ (installed if missing) and `npm install -g` of the repo tarball.
+# While no release has been published yet (and on musl libc), it falls back to a private
+# official Node 22 under ~/.consensus plus `npm install --prefix` of consensus next to it;
+# your own Node, global npm prefix and npm config are never touched.
 #
 # See docs/install.md in the repo for exactly what is written where.
 #
@@ -72,11 +73,10 @@ Environment:
   CONSENSUS_NO_SETUP        set to 1 for --no-setup
   NO_COLOR                  plain output
 
-Fallback while no GitHub Release exists (Node + npm install):
+Fallback while no GitHub Release exists (private Node + npm, still no sudo):
+  CONSENSUS_NODE_DIST       Node download mirror (default: https://nodejs.org/dist)
   CONSENSUS_REPO            tarball/spec to install instead of the npm package
-  CONSENSUS_SHA256          with CONSENSUS_VERSION: verify the repo tarball checksum
-  CONSENSUS_MIN_NODE        minimum Node major version (default: 22)
-  CONSENSUS_SYSTEM_NODE     set to 1 to allow a sudo/apt Node install on Linux
+  CONSENSUS_SHA256          verify the source tarball checksum before installing it
 
 Exit codes: 0 ok, 1 error, 2 unsupported platform, 3 network, 4 checksum mismatch.
 Docs: $REPO_URL/blob/main/docs/install.md
@@ -184,114 +184,140 @@ if [ -n "$INSTALL_DIR" ]; then BIN_DIR="$INSTALL_DIR/bin"; else BIN_DIR="${XDG_B
 CFG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/consensus"
 LOG_FILE=""
 
-# ================================================================ legacy fallback (Node + npm)
-# Used only while no GitHub Release with archives exists, and on musl with Node present.
-legacy_install() {
-  STEP_NAME="npm install (fallback)"
-  MIN_NODE="${CONSENSUS_MIN_NODE:-22}"
-  REF="${CONSENSUS_VERSION:+refs/tags/$REQ_VERSION}"; REF="${REF:-refs/heads/main}"
-  REPO="${CONSENSUS_REPO:-$REPO_URL/archive/$REF.tar.gz}"
-  PREFIX="${INSTALL_DIR:-}"
 
-  BEFORE=""
-  if have consensus; then
-    BEFORE=$(consensus --version 2>/dev/null || echo "")
-    [ -n "$BEFORE" ] && info "already installed: consensus $BEFORE (this run upgrades it in place)"
-  fi
+# ================================================================ fallback: private Node + npm
+# Used only when there is no release archive to download: no GitHub Release published yet (404),
+# a release without this platform, or musl libc. It never uses your Node (except on musl, where
+# the official build cannot run), never runs `npm install -g` into a system prefix and never
+# changes your npm config: it downloads the official Node 22 into the new version directory,
+# npm-installs consensus into a prefix next to it, and writes the same launcher as a release
+# archive has. Everything after that (link, PATH, receipt, hand-off) is shared.
+NODE_DIST="${CONSENSUS_NODE_DIST:-https://nodejs.org/dist}"
+NODE_DIST="${NODE_DIST%/}"
 
-  node_ok() {
-    have node || return 1
-    major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
-    [ "$major" -ge "$MIN_NODE" ]
-  }
-
-  install_node() {
-    say "Node.js $MIN_NODE+ is required. Installing..."
-    OS=$(uname -s)
-    if [ "$OS" = "Darwin" ] && have brew; then
-      info "using Homebrew"; brew install node && return 0
-    fi
-    if have fnm; then
-      info "using fnm"; fnm install --lts && fnm use lts-latest && return 0
-    fi
-    if [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ]; then
-      info "using nvm"; . "${NVM_DIR:-$HOME/.nvm}/nvm.sh" && nvm install --lts && nvm use --lts && return 0
-    fi
-    if [ "${CONSENSUS_SYSTEM_NODE:-}" = "1" ] && [ "$OS" = "Linux" ] && have apt-get && have sudo; then
-      info "using NodeSource (apt) because CONSENSUS_SYSTEM_NODE=1"; curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - && sudo apt-get install -y nodejs && return 0
-    fi
-    have curl || die "Node $MIN_NODE+ is missing and curl is needed to install it. Install Node $MIN_NODE+ from https://nodejs.org and re-run." 1
-    info "using fnm installer (user-local, no sudo; set CONSENSUS_SYSTEM_NODE=1 to use apt instead)"
-    curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell
-    export PATH="$HOME/.local/share/fnm:$HOME/.fnm:$PATH"
-    if have fnm; then eval "$(fnm env)"; fnm install --lts && fnm use lts-latest && return 0; fi
-    die "could not install Node automatically. Install Node $MIN_NODE+ from https://nodejs.org and re-run." 1
-  }
-
-  node_ok || install_node
-  node_ok || die "Node $MIN_NODE+ still not on PATH. Open a new terminal and re-run, or install from https://nodejs.org" 1
-  info "node $(node -v), npm $(npm -v)"
-
-  NPM_LOG=$(mktemp)
-  try_install() {
-    if [ -n "$PREFIX" ]; then
-      npm install -g --prefix "$PREFIX" "$1" >"$NPM_LOG" 2>&1
-    else
-      npm install -g "$1" >"$NPM_LOG" 2>&1
-    fi
-  }
-
-  if [ -n "$PREFIX" ]; then
-    say "Installing $PKG into $PREFIX (CONSENSUS_INSTALL_DIR)..."
-    mkdir -p "$PREFIX"
-    export PATH="$PREFIX/bin:$PATH"
+# npm_run <args...>: the staged (or, on musl, the system) npm with its node first on PATH
+npm_run() {
+  if [ -n "$SYSTEM_NODE" ]; then
+    env PATH="$(dirname "$SYSTEM_NODE"):$PATH" npm "$@"
   else
-    say "Installing $PKG with npm (this takes a minute)..."
+    env PATH="$STAGE/node/bin:$PATH" "$STAGE/node/bin/node" "$STAGE/node/lib/node_modules/npm/bin/npm-cli.js" "$@"
   fi
-
-  if ! try_install "$PKG"; then
-    if grep -qiE "E404|404 Not Found" "$NPM_LOG"; then
-      info "$PKG is not on npm yet; installing from $REPO"
-      if [ -n "${CONSENSUS_SHA256:-}" ]; then
-        TARBALL=$(mktemp); curl -fsSL "$REPO" -o "$TARBALL" || die "could not download $REPO" 3
-        ACTUAL=$( (command -v sha256sum >/dev/null 2>&1 && sha256sum "$TARBALL" || shasum -a 256 "$TARBALL") | cut -d' ' -f1)
-        [ "$ACTUAL" = "$CONSENSUS_SHA256" ] || die "checksum mismatch for $REPO: expected $CONSENSUS_SHA256 got $ACTUAL" 4
-        info "checksum verified"
-        try_install "$TARBALL" || { cat "$NPM_LOG" >&2; die "install from verified tarball failed (see output above)" 1; }
-      else
-        try_install "$REPO" || { cat "$NPM_LOG" >&2; die "install from $REPO failed (see output above)" 1; }
-      fi
-    elif grep -qiE "EACCES|permission denied" "$NPM_LOG"; then
-      PREFIX="$HOME/.npm-global"
-      info "npm global dir not writable; using $PREFIX"
-      mkdir -p "$PREFIX" && npm config set prefix "$PREFIX"
-      export PATH="$PREFIX/bin:$PATH"
-      try_install "$PKG" || try_install "$REPO" || { cat "$NPM_LOG" >&2; die "npm install failed (see output above)" 1; }
-      for rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
-        if [ -f "$rc" ] && ! grep -q 'npm-global/bin' "$rc"; then printf '\nexport PATH="%s/bin:$PATH"\n' "$PREFIX" >> "$rc"; fi
-      done
-      info "added $PREFIX/bin to your shell PATH (open a new terminal later)"
-    else
-      cat "$NPM_LOG" >&2; die "npm install -g $PKG failed (see output above)" 1
-    fi
-  fi
-  rm -f "$NPM_LOG"
-
-  have consensus || die "consensus was installed but is not on PATH. Add \"\$(npm prefix -g)/bin\" to PATH, open a new terminal, and run: consensus setup" 1
-  AFTER=$(consensus --version 2>/dev/null || echo "?")
-  if [ -n "$BEFORE" ] && [ "$BEFORE" = "$AFTER" ]; then
-    info "consensus $AFTER (already current)"
-  elif [ -n "$BEFORE" ]; then
-    info "consensus $BEFORE -> $AFTER"
-  else
-    info "consensus $AFTER"
-  fi
-  LAUNCHER=$(command -v consensus)
-  NEW_VERSION="$AFTER"
-  PREV_VERSION="$BEFORE"
-  PATH_HINT=""
 }
 
+# npm_install <spec>: install into $STAGE/npm, output to the log; a dot every 5s on a tty
+npm_install() {
+  : >"$TMP_DIR/npm.log"
+  ticker=""
+  if [ -t 2 ]; then
+    ( while :; do sleep 5; printf '.' >&2; done ) &
+    ticker=$!
+  fi
+  n_status=0
+  npm_run install -g --prefix "$STAGE/npm" --no-fund --no-audit --loglevel=error "$1" >"$TMP_DIR/npm.log" 2>&1 || n_status=$?
+  if [ -n "$ticker" ]; then kill "$ticker" 2>/dev/null || true; wait "$ticker" 2>/dev/null || true; printf '\n' >&2; fi
+  cat "$TMP_DIR/npm.log" >>"$LOG_FILE"
+  return "$n_status"
+}
+
+fallback_stage() {
+  STAGE="$TMP_DIR/x/consensus"
+  mkdir -p "$STAGE/bin" || die "cannot create $STAGE" 1
+  if [ -n "$SYSTEM_NODE" ]; then
+    NODE_VERSION=$("$SYSTEM_NODE" -p 'process.versions.node' 2>/dev/null || echo "?")
+    step 2 Runtime "your Node $NODE_VERSION ($SYSTEM_NODE), because the official Node build needs glibc"
+    step 3 Verifying "skipped (system Node)"
+    have npm || die "npm is missing next to $SYSTEM_NODE. Install it (e.g. apk add npm) and re-run." 1
+  else
+    STEP_NAME="download Node"
+    SUMS_URL="$NODE_DIST/latest-v22.x/SHASUMS256.txt"
+    rc=0; fetch "$SUMS_URL" "$TMP_DIR/NODESUMS" || rc=$?
+    [ "$rc" = 0 ] || die "could not download $SUMS_URL. Check your connection or proxy (HTTPS_PROXY) and re-run." 3
+    NODE_TGZ=$(awk -v s="-$PLATFORM.tar.gz" '{ n = $2; if (index(n, "node-v22.") == 1 && substr(n, length(n) - length(s) + 1) == s) print n }' "$TMP_DIR/NODESUMS" | head -n 1)
+    [ -n "$NODE_TGZ" ] || die "nodejs.org has no Node 22 build for $PLATFORM" 2
+    NODE_SHA=$(awk -v f="$NODE_TGZ" '$2 == f { print $1 }' "$TMP_DIR/NODESUMS" | head -n 1)
+    NODE_VERSION=${NODE_TGZ#node-v}
+    NODE_VERSION=${NODE_VERSION%-"$PLATFORM".tar.gz}
+    step 2 Downloading "Node $NODE_VERSION runtime from nodejs.org (a private copy; your own Node is untouched)"
+    rc=0; fetch "$NODE_DIST/latest-v22.x/$NODE_TGZ" "$TMP_DIR/$NODE_TGZ" progress || rc=$?
+    [ "$rc" = 0 ] || die "could not download $NODE_DIST/latest-v22.x/$NODE_TGZ. Check your connection or proxy and re-run." 3
+    STEP_NAME="verify Node checksum"
+    [ -n "$SHA_TOOL" ] || die "no sha256 tool found (sha256sum, shasum or openssl) to verify the download" 4
+    ACTUAL=$(sha256_of "$TMP_DIR/$NODE_TGZ")
+    if [ -z "$NODE_SHA" ] || [ "$ACTUAL" != "$NODE_SHA" ]; then
+      rm -f "$TMP_DIR/$NODE_TGZ"
+      die "checksum verification failed for $NODE_TGZ: expected ${NODE_SHA:-?}, got $ACTUAL. The download was deleted. Re-run." 4
+    fi
+    step 3 Verifying "sha256 ok (nodejs.org SHASUMS256.txt)"
+    STEP_NAME="unpack Node"
+    tar -xzf "$TMP_DIR/$NODE_TGZ" -C "$TMP_DIR" >>"$LOG_FILE" 2>&1 || die "could not unpack $NODE_TGZ (see $LOG_FILE)" 1
+    mv "$TMP_DIR/${NODE_TGZ%.tar.gz}" "$STAGE/node" || die "could not stage the Node runtime" 1
+    rm -f "$TMP_DIR/$NODE_TGZ"
+  fi
+
+  STEP_NAME="npm install"
+  if [ "$REQ_VERSION" = latest ]; then
+    REG_SPEC="$PKG@latest"; TAR_REF="refs/heads/main"
+  else
+    REG_SPEC="$PKG@${REQ_VERSION#v}"; TAR_REF="refs/tags/$REQ_VERSION"
+  fi
+  TARBALL_URL="${CONSENSUS_REPO:-$REPO_URL/archive/$TAR_REF.tar.gz}"
+  step 4 Installing "consensus with npm into $(tilde "$ROOT") (takes about a minute)"
+  SOURCE=""
+  if [ -z "${CONSENSUS_REPO:-}" ] && [ -z "${CONSENSUS_SHA256:-}" ] && npm_install "$REG_SPEC"; then
+    SOURCE="npm:$REG_SPEC"
+  else
+    if [ -z "${CONSENSUS_REPO:-}" ] && [ -z "${CONSENSUS_SHA256:-}" ]; then
+      grep -qiE "E404|ETARGET|404 Not Found|No matching version" "$TMP_DIR/npm.log" || {
+        tail -n 20 "$TMP_DIR/npm.log" >&2
+        die "npm install $REG_SPEC failed (full log: $LOG_FILE)" 3
+      }
+      detail "$PKG is not on the npm registry yet; installing from $TARBALL_URL"
+    fi
+    SPEC="$TARBALL_URL"
+    if [ -n "${CONSENSUS_SHA256:-}" ]; then
+      rc=0; fetch "$TARBALL_URL" "$TMP_DIR/source.tar.gz" || rc=$?
+      [ "$rc" = 0 ] || die "could not download $TARBALL_URL" 3
+      ACTUAL=$(sha256_of "$TMP_DIR/source.tar.gz")
+      [ "$ACTUAL" = "$CONSENSUS_SHA256" ] || die "checksum mismatch for $TARBALL_URL: expected $CONSENSUS_SHA256, got $ACTUAL" 4
+      detail "source tarball sha256 ok (CONSENSUS_SHA256)"
+      SPEC="$TMP_DIR/source.tar.gz"
+    fi
+    npm_install "$SPEC" || {
+      tail -n 20 "$TMP_DIR/npm.log" >&2
+      die "npm install of $TARBALL_URL failed (full log: $LOG_FILE)" 3
+    }
+    SOURCE="$TARBALL_URL"
+  fi
+
+  APP_DIR="$STAGE/npm/lib/node_modules/$PKG"
+  [ -f "$APP_DIR/dist/cli.js" ] || die "npm finished but $APP_DIR/dist/cli.js is missing (see $LOG_FILE)" 1
+  NODE_FOR_VERSION="${SYSTEM_NODE:-$STAGE/node/bin/node}"
+  NEW_VERSION=$("$NODE_FOR_VERSION" -p 'require(process.argv[1]).version' "$APP_DIR/package.json" 2>>"$LOG_FILE") || die "could not read the installed version (see $LOG_FILE)" 1
+  printf '%s\n' "$NEW_VERSION" >"$STAGE/VERSION"
+  {
+    echo '#!/bin/sh'
+    echo '# consensus launcher (installer fallback: private Node + npm). Relocatable; follows symlinks.'
+    echo 'self=$0'
+    echo 'while [ -h "$self" ]; do'
+    echo '  link=$(readlink "$self")'
+    echo '  case $link in'
+    echo '    /*) self=$link ;;'
+    echo '    *) self=$(dirname -- "$self")/$link ;;'
+    echo '  esac'
+    echo 'done'
+    echo 'here=$(CDPATH= cd -- "$(dirname -- "$self")/.." && pwd -P)'
+    echo 'CONSENSUS_HOME=$here'
+    echo 'export CONSENSUS_HOME'
+    if [ -n "$SYSTEM_NODE" ]; then
+      printf 'exec "%s" --no-warnings=ExperimentalWarning "$here/npm/lib/node_modules/%s/dist/cli.js" "$@"\n' "$SYSTEM_NODE" "$PKG"
+    else
+      printf 'exec "$here/node/bin/node" --no-warnings=ExperimentalWarning "$here/npm/lib/node_modules/%s/dist/cli.js" "$@"\n' "$PKG"
+    fi
+  } >"$STAGE/bin/consensus" || die "could not write the launcher" 1
+  chmod 755 "$STAGE/bin/consensus" || die "could not make the launcher executable" 1
+}
+
+# ================================================================ release install
 # ================================================================ standalone install
 # ---------------------------------------------------------------- 1. platform
 detect_platform() {
@@ -398,261 +424,273 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
-MODE=standalone
+
+MODE=release
+SYSTEM_NODE=""
 if [ "$MUSL" = 1 ]; then
-  if have node && [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 22 ]; then
-    warn "musl libc (e.g. Alpine) detected: the standalone build needs glibc; installing with your Node + npm instead"
-    MODE=legacy
+  if have node && [ "$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)" -ge 22 ] 2>/dev/null; then
+    SYSTEM_NODE=$(node -p 'process.execPath')
+    warn "musl libc (e.g. Alpine) detected: official Node builds need glibc, so consensus will run on your Node $(node -v)"
+    MODE=fallback
   else
-    die "musl libc (e.g. Alpine) detected. The standalone build needs glibc. Install Node 22+ and re-run this installer (it will use npm):  apk add nodejs npm" 2
+    die "musl libc (e.g. Alpine) detected. The standalone build needs glibc. Install Node 22+ (apk add nodejs npm) and re-run this installer; it will use that Node." 2
   fi
 fi
 
 step 1 Platform "$OS_LABEL, $PLATFORM$ARCH_NOTE"
 
-if [ "$MODE" = standalone ]; then
-  [ -n "$DL" ] || die "neither curl nor wget is installed. Install one (e.g. apt-get install curl) and re-run." 3
-  mkdir -p "$ROOT" 2>/dev/null || die "cannot create $ROOT (check permissions on $(dirname "$ROOT"))" 1
-  [ -w "$ROOT" ] || die "$ROOT is not writable by $(id -un 2>/dev/null || echo you). If an earlier sudo run created it: sudo chown -R \"\$(id -un)\" \"$ROOT\"" 1
-  LOG_FILE="$ROOT/install.log"
-  : >"$LOG_FILE"
-  TMP_DIR=$(mktemp -d "$ROOT/.install.XXXXXX")
+STEP_NAME="prepare $ROOT"
+[ -n "$DL" ] || die "neither curl nor wget is installed. Install one (e.g. apt-get install curl) and re-run." 3
+mkdir -p "$ROOT" 2>/dev/null || die "cannot create $ROOT (check permissions on $(dirname "$ROOT"))" 1
+[ -w "$ROOT" ] || die "$ROOT is not writable by $(id -un 2>/dev/null || echo you). If an earlier sudo run created it: sudo chown -R \"\$(id -un)\" \"$ROOT\"" 1
+LOG_FILE="$ROOT/install.log"
+: >"$LOG_FILE" || die "cannot write $LOG_FILE" 1
+TMP_DIR=$(mktemp -d "$ROOT/.install.XXXXXX") || die "cannot create a temporary directory in $ROOT" 1
 
+EXPECTED=""
+if [ "$MODE" = release ]; then
   STEP_NAME="download SHA256SUMS"
   rc=0; fetch "$BASE/SHA256SUMS" "$TMP_DIR/SHA256SUMS" || rc=$?
   if [ "$rc" = 44 ]; then
     if [ "$REQ_VERSION" = latest ] && [ -z "${CONSENSUS_DOWNLOAD_BASE:-}" ]; then
-      warn "no standalone release is published yet; falling back to installing with Node + npm"
+      warn "no consensus release is published yet; falling back to a private Node + npm install"
     else
-      warn "no standalone archives at $BASE; falling back to installing with Node + npm"
+      warn "no release archives at $BASE; falling back to a private Node + npm install"
     fi
-    MODE=legacy
+    MODE=fallback
   elif [ "$rc" != 0 ]; then
     die "could not download $BASE/SHA256SUMS (network error). Check your connection or proxy (HTTPS_PROXY) and re-run." 3
+  else
+    EXPECTED=$(awk -v f="$ASSET" '$2 == f || $2 == "*" f { print $1 }' "$TMP_DIR/SHA256SUMS" | head -n 1)
+    if [ -z "$EXPECTED" ]; then
+      warn "the release has no build for $PLATFORM; falling back to a private Node + npm install"
+      MODE=fallback
+    fi
   fi
 fi
 
-if [ "$MODE" = standalone ]; then
-  EXPECTED=$(awk -v f="$ASSET" '$2 == f || $2 == "*" f { print $1 }' "$TMP_DIR/SHA256SUMS" | head -n 1)
-  if [ -z "$EXPECTED" ]; then
-    warn "the release has no build for $PLATFORM; falling back to installing with Node + npm"
-    MODE=legacy
-  fi
+# ---------------------------------------------------------------- previous install
+PREV_VERSION=""
+PREV_SHA=""
+PREV_RECEIPT=0
+if [ -f "$ROOT/receipt.json" ]; then
+  PREV_RECEIPT=1
+  PREV_VERSION=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$ROOT/receipt.json" | head -n 1)
+  PREV_SHA=$(sed -n 's/.*"sha256": *"\([^"]*\)".*/\1/p' "$ROOT/receipt.json" | head -n 1)
+elif have consensus; then
+  PREV_VERSION=$(consensus --version 2>/dev/null | cut -d' ' -f1 || true)
 fi
 
-if [ "$MODE" = legacy ]; then
-  if [ -n "$TMP_DIR" ]; then
-    rm -rf "$TMP_DIR"; TMP_DIR=""
-    rm -f "$LOG_FILE"; LOG_FILE=""
-    rmdir "$ROOT" 2>/dev/null || true
+# ---------------------------------------------------------------- 2-4. download, verify, unpack
+SKIPPED=0
+SOURCE="$BASE/$ASSET"
+if [ "$MODE" = release ] && [ "$PREV_SHA" = "$EXPECTED" ] && [ -x "$ROOT/current/bin/consensus" ] && [ -f "$ROOT/current/VERSION" ]; then
+  SKIPPED=1
+  NEW_VERSION=$(cat "$ROOT/current/VERSION")
+  step 2 Downloading "skipped: consensus $NEW_VERSION for $PLATFORM is already installed"
+  step 3 Verifying "sha256 matches the installed build"
+  step 4 Installing "$(tilde "$ROOT/current") (unchanged)"
+elif [ "$MODE" = release ]; then
+  STEP_NAME="download $ASSET"
+  step 2 Downloading "$ASSET"
+  rc=0; fetch "$BASE/$ASSET" "$TMP_DIR/$ASSET" progress || rc=$?
+  [ "$rc" = 0 ] || die "could not download $BASE/$ASSET$([ "$rc" = 44 ] && echo " (404 Not Found)"). Check your connection or proxy and re-run." 3
+
+  STEP_NAME="verify checksum"
+  [ -n "$SHA_TOOL" ] || die "no sha256 tool found (sha256sum, shasum or openssl) to verify the download" 4
+  ACTUAL=$(sha256_of "$TMP_DIR/$ASSET")
+  if [ "$ACTUAL" != "$EXPECTED" ]; then
+    rm -f "$TMP_DIR/$ASSET"
+    die "checksum verification failed for $ASSET: expected $EXPECTED, got $ACTUAL. The download was deleted. Re-run; if it repeats, open an issue at $REPO_URL/issues" 4
   fi
-  STEP_TOTAL=2
-  step 2 Installing "with npm (fallback; the standalone release is not available)"
-  legacy_install
+  step 3 Verifying "sha256 ok (SHA256SUMS from the release)"
+
+  STEP_NAME="unpack"
+  mkdir -p "$TMP_DIR/x" || die "cannot create $TMP_DIR/x" 1
+  tar -xzf "$TMP_DIR/$ASSET" -C "$TMP_DIR/x" >>"$LOG_FILE" 2>&1 || die "could not unpack $ASSET (see $LOG_FILE)" 1
+  rm -f "$TMP_DIR/$ASSET"
+  { [ -f "$TMP_DIR/x/consensus/VERSION" ] && [ -x "$TMP_DIR/x/consensus/bin/consensus" ]; } || die "$ASSET does not look like a consensus release archive" 1
+  NEW_VERSION=$(cat "$TMP_DIR/x/consensus/VERSION")
+  NODE_VERSION=$(cat "$TMP_DIR/x/consensus/node/VERSION" 2>/dev/null || echo "22")
 else
-  # ------------------------------------------------------------ previous install
-  PREV_VERSION=""
-  PREV_SHA=""
-  if [ -f "$ROOT/receipt.json" ]; then
-    PREV_VERSION=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$ROOT/receipt.json" | head -n 1)
-    PREV_SHA=$(sed -n 's/.*"sha256": *"\([^"]*\)".*/\1/p' "$ROOT/receipt.json" | head -n 1)
-  elif have consensus; then
-    PREV_VERSION=$(consensus --version 2>/dev/null | cut -d' ' -f1 || true)
+  fallback_stage
+  EXPECTED=""
+fi
+
+if [ "$SKIPPED" = 0 ]; then
+  STEP_NAME="install into $ROOT/versions"
+  mkdir -p "$ROOT/versions" || die "cannot create $ROOT/versions" 1
+  rm -rf "$ROOT/versions/$NEW_VERSION.old"
+  if [ -e "$ROOT/versions/$NEW_VERSION" ]; then
+    mv "$ROOT/versions/$NEW_VERSION" "$ROOT/versions/$NEW_VERSION.old" || die "cannot replace $ROOT/versions/$NEW_VERSION" 1
   fi
-
-  # ------------------------------------------------------------ 2. download
-  if [ "$PREV_SHA" = "$EXPECTED" ] && [ -x "$ROOT/current/bin/consensus" ] && [ -f "$ROOT/current/VERSION" ]; then
-    NEW_VERSION=$(cat "$ROOT/current/VERSION")
-    step 2 Downloading "skipped: consensus $NEW_VERSION for $PLATFORM is already installed"
-    step 3 Verifying "sha256 matches the installed build"
-    step 4 Installing "$(tilde "$ROOT/current") (unchanged)"
-  else
-    STEP_NAME="download $ASSET"
-    step 2 Downloading "$ASSET"
-    rc=0; fetch "$BASE/$ASSET" "$TMP_DIR/$ASSET" progress || rc=$?
-    [ "$rc" = 0 ] || die "could not download $BASE/$ASSET$([ "$rc" = 44 ] && echo " (404 Not Found)"). Check your connection or proxy and re-run." 3
-
-    STEP_NAME="verify checksum"
-    [ -n "$SHA_TOOL" ] || die "no sha256 tool found (sha256sum, shasum or openssl) to verify the download" 4
-    ACTUAL=$(sha256_of "$TMP_DIR/$ASSET")
-    if [ "$ACTUAL" != "$EXPECTED" ]; then
-      rm -f "$TMP_DIR/$ASSET"
-      die "checksum verification failed for $ASSET: expected $EXPECTED, got $ACTUAL. The download was deleted. Re-run; if it repeats, open an issue at $REPO_URL/issues" 4
-    fi
-    step 3 Verifying "sha256 ok (SHA256SUMS from the release)"
-
-    STEP_NAME="unpack"
-    mkdir -p "$TMP_DIR/x"
-    tar -xzf "$TMP_DIR/$ASSET" -C "$TMP_DIR/x" >>"$LOG_FILE" 2>&1 || die "could not unpack $ASSET (see $LOG_FILE)" 1
-    [ -f "$TMP_DIR/x/consensus/VERSION" ] && [ -x "$TMP_DIR/x/consensus/bin/consensus" ] || die "$ASSET does not look like a consensus release archive" 1
-    NEW_VERSION=$(cat "$TMP_DIR/x/consensus/VERSION")
-    NODE_VERSION=$(cat "$TMP_DIR/x/consensus/node/VERSION" 2>/dev/null || echo "22")
-    mkdir -p "$ROOT/versions"
-    rm -rf "$ROOT/versions/$NEW_VERSION.old"
-    [ -e "$ROOT/versions/$NEW_VERSION" ] && mv "$ROOT/versions/$NEW_VERSION" "$ROOT/versions/$NEW_VERSION.old"
-    mv "$TMP_DIR/x/consensus" "$ROOT/versions/$NEW_VERSION" || die "could not move the new version into $ROOT/versions" 1
-    rm -rf "$ROOT/versions/$NEW_VERSION.old"
-    ln -sfn "versions/$NEW_VERSION" "$ROOT/current" 2>/dev/null || { rm -f "$ROOT/current"; ln -s "versions/$NEW_VERSION" "$ROOT/current"; }
+  mv "$TMP_DIR/x/consensus" "$ROOT/versions/$NEW_VERSION" || die "could not move the new version into $ROOT/versions" 1
+  rm -rf "$ROOT/versions/$NEW_VERSION.old"
+  { ln -sfn "versions/$NEW_VERSION" "$ROOT/current" 2>/dev/null || { rm -f "$ROOT/current" && ln -s "versions/$NEW_VERSION" "$ROOT/current"; }; } || die "could not point $ROOT/current at versions/$NEW_VERSION" 1
+  if [ "$MODE" = release ]; then
     step 4 Installing "$(tilde "$ROOT") (bundled Node $NODE_VERSION; your own Node, if any, is untouched)"
-    # keep the current and the previous version, prune older ones
-    ( cd "$ROOT/versions" && ls -t 2>/dev/null | awk 'NR > 2' | while IFS= read -r old; do
-        [ "$old" = "$NEW_VERSION" ] || rm -rf "./$old"
-      done ) || true
   fi
+  # keep the current and the previous version, prune older ones
+  ( cd "$ROOT/versions" && ls -t 2>/dev/null | awk 'NR > 2' | while IFS= read -r old; do
+      [ "$old" = "$NEW_VERSION" ] || rm -rf "./$old"
+    done ) || true
+fi
 
-  # ------------------------------------------------------------ 5. link + PATH
-  STEP_NAME="link launcher"
-  TARGET="$ROOT/current/bin/consensus"
-  if ! mkdir -p "$BIN_DIR" 2>/dev/null || [ ! -w "$BIN_DIR" ]; then
-    warn "$BIN_DIR is not writable; linking into $ROOT/bin instead"
-    BIN_DIR="$ROOT/bin"; mkdir -p "$BIN_DIR"
+# ------------------------------------------------------------ 5. link + PATH
+STEP_NAME="link launcher"
+TARGET="$ROOT/current/bin/consensus"
+if ! mkdir -p "$BIN_DIR" 2>/dev/null || [ ! -w "$BIN_DIR" ]; then
+  warn "$BIN_DIR is not writable; linking into $ROOT/bin instead"
+  BIN_DIR="$ROOT/bin"
+  mkdir -p "$BIN_DIR" || die "cannot create $BIN_DIR" 1
+fi
+LAUNCHER="$BIN_DIR/consensus"
+if [ -e "$LAUNCHER" ] && [ ! -L "$LAUNCHER" ]; then
+  mv -f "$LAUNCHER" "$LAUNCHER.bak" && warn "moved an existing $(tilde "$LAUNCHER") to $(tilde "$LAUNCHER.bak")"
+fi
+ln -sfn "$TARGET" "$LAUNCHER" || die "could not link $LAUNCHER -> $TARGET" 1
+step 5 Linking "$(tilde "$LAUNCHER")"
+
+ENV_FILE="$ROOT/env"
+ENV_FISH="$ROOT/env.fish"
+BIN_REF=$(homevar "$BIN_DIR")
+{
+  echo '# consensus: put the consensus launcher on PATH. Sourced from your shell rc files; safe to source twice.'
+  echo 'case ":${PATH}:" in'
+  echo "  *\":$BIN_REF:\"*) ;;"
+  echo "  *) export PATH=\"$BIN_REF:\$PATH\" ;;"
+  echo 'esac'
+} >"$ENV_FILE" || die "cannot write $ENV_FILE" 1
+{
+  echo '# consensus: put the consensus launcher on PATH (fish).'
+  echo "if not contains -- \"$BIN_REF\" \$PATH"
+  echo "    set -gx PATH \"$BIN_REF\" \$PATH"
+  echo 'end'
+} >"$ENV_FISH" || die "cannot write $ENV_FISH" 1
+ENV_REF=$(homevar "$ENV_FILE")
+RC_LINE=". \"$ENV_REF\"  # consensus"
+
+# add_rc_line <file> <create:0|1>
+RC_EDITED=""
+RC_ALREADY=""
+RC_SKIPPED=""
+add_rc_line() {
+  a_file="$1"; a_create="$2"
+  if [ -L "$a_file" ]; then
+    a_real=$(cd "$(dirname "$a_file")" && readlink "$a_file")
+    case "$a_real" in /*) ;; *) a_real="$(dirname "$a_file")/$a_real" ;; esac
+    case "$a_real" in "$HOME"/*) ;; *) RC_SKIPPED="$RC_SKIPPED $(tilde "$a_file")"; return 0 ;; esac
   fi
-  LAUNCHER="$BIN_DIR/consensus"
-  if [ -e "$LAUNCHER" ] && [ ! -L "$LAUNCHER" ]; then
-    mv -f "$LAUNCHER" "$LAUNCHER.bak" && warn "moved an existing $(tilde "$LAUNCHER") to $(tilde "$LAUNCHER.bak")"
+  if [ ! -e "$a_file" ]; then
+    [ "$a_create" = 1 ] || return 0
+    mkdir -p "$(dirname "$a_file")" && : >"$a_file" || { RC_SKIPPED="$RC_SKIPPED $(tilde "$a_file")"; return 0; }
   fi
-  ln -sfn "$TARGET" "$LAUNCHER"
-  step 5 Linking "$(tilde "$LAUNCHER")"
+  if [ ! -f "$a_file" ] || [ ! -w "$a_file" ]; then RC_SKIPPED="$RC_SKIPPED $(tilde "$a_file")"; return 0; fi
+  if grep -Fq "$ENV_REF\"  # consensus" "$a_file" 2>/dev/null; then
+    RC_ALREADY="$RC_ALREADY $a_file"; return 0
+  fi
+  if [ -s "$a_file" ] && [ "$(tail -c 1 "$a_file" | od -An -c | tr -d ' ')" != '\n' ]; then
+    printf '\n' >>"$a_file"
+  fi
+  printf '%s\n' "$RC_LINE" >>"$a_file"
+  RC_EDITED="$RC_EDITED $a_file"
+}
 
-  ENV_FILE="$ROOT/env"
-  ENV_FISH="$ROOT/env.fish"
-  BIN_REF=$(homevar "$BIN_DIR")
-  {
-    echo '# consensus: put the consensus launcher on PATH. Sourced from your shell rc files; safe to source twice.'
-    echo 'case ":${PATH}:" in'
-    echo "  *\":$BIN_REF:\"*) ;;"
-    echo "  *) export PATH=\"$BIN_REF:\$PATH\" ;;"
-    echo 'esac'
-  } >"$ENV_FILE"
-  {
-    echo '# consensus: put the consensus launcher on PATH (fish).'
-    echo "if not contains -- \"$BIN_REF\" \$PATH"
-    echo "    set -gx PATH \"$BIN_REF\" \$PATH"
-    echo 'end'
-  } >"$ENV_FISH"
-  ENV_REF=$(homevar "$ENV_FILE")
-  RC_LINE=". \"$ENV_REF\"  # consensus"
+user_shell() {
+  u_shell="${SHELL:-}"
+  if [ -z "$u_shell" ]; then
+    if have getent; then u_shell=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)
+    elif have dscl; then u_shell=$(dscl . -read "/Users/$(id -un)" UserShell 2>/dev/null | sed 's/UserShell: *//')
+    fi
+  fi
+  basename "${u_shell:-sh}"
+}
 
-  # add_rc_line <file> <create:0|1>
-  RC_EDITED=""
-  RC_ALREADY=""
-  RC_SKIPPED=""
-  add_rc_line() {
-    a_file="$1"; a_create="$2"
-    if [ -L "$a_file" ]; then
-      a_real=$(cd "$(dirname "$a_file")" && readlink "$a_file")
-      case "$a_real" in /*) ;; *) a_real="$(dirname "$a_file")/$a_real" ;; esac
-      case "$a_real" in "$HOME"/*) ;; *) RC_SKIPPED="$RC_SKIPPED $(tilde "$a_file")"; return 0 ;; esac
-    fi
-    if [ ! -e "$a_file" ]; then
-      [ "$a_create" = 1 ] || return 0
-      mkdir -p "$(dirname "$a_file")" && : >"$a_file" || { RC_SKIPPED="$RC_SKIPPED $(tilde "$a_file")"; return 0; }
-    fi
-    if [ ! -f "$a_file" ] || [ ! -w "$a_file" ]; then RC_SKIPPED="$RC_SKIPPED $(tilde "$a_file")"; return 0; fi
-    if grep -Fq "$ENV_REF\"  # consensus" "$a_file" 2>/dev/null; then
-      RC_ALREADY="$RC_ALREADY $a_file"; return 0
-    fi
-    if [ -s "$a_file" ] && [ "$(tail -c 1 "$a_file" | od -An -c | tr -d ' ')" != '\n' ]; then
-      printf '\n' >>"$a_file"
-    fi
-    printf '%s\n' "$RC_LINE" >>"$a_file"
-    RC_EDITED="$RC_EDITED $a_file"
-  }
-
-  user_shell() {
-    u_shell="${SHELL:-}"
-    if [ -z "$u_shell" ]; then
-      if have getent; then u_shell=$(getent passwd "$(id -un)" 2>/dev/null | cut -d: -f7)
-      elif have dscl; then u_shell=$(dscl . -read "/Users/$(id -un)" UserShell 2>/dev/null | sed 's/UserShell: *//')
-      fi
-    fi
-    basename "${u_shell:-sh}"
-  }
-
-  PATH_HINT=""
-  PATH_STATUS=""
-  ON_PATH=0
-  case ":$PATH:" in *":$BIN_DIR:"*) ON_PATH=1 ;; esac
-  FISH_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/consensus.fish"
-  if [ "$MODIFY_PATH" = 1 ]; then
-    ZD="${ZDOTDIR:-$HOME}"
-    SH_NAME=$(user_shell)
-    case "$SH_NAME" in
-      zsh)
-        add_rc_line "$ZD/.zshrc" 1
-        add_rc_line "$ZD/.zprofile" 1
-        for f in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do add_rc_line "$f" 0; done ;;
-      bash)
-        add_rc_line "$HOME/.bashrc" 1
-        LOGIN_RC=""
-        for f in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
-          [ -e "$f" ] && { LOGIN_RC="$f"; break; }
-        done
-        [ -n "$LOGIN_RC" ] || { [ "$OS" = darwin ] && LOGIN_RC="$HOME/.bash_profile" || LOGIN_RC="$HOME/.profile"; }
-        add_rc_line "$LOGIN_RC" 1
-        for f in "$ZD/.zshrc" "$ZD/.zprofile"; do add_rc_line "$f" 0; done ;;
-      fish)
-        for f in "$HOME/.bashrc" "$HOME/.profile" "$ZD/.zshrc"; do add_rc_line "$f" 0; done ;;
-      *)
-        add_rc_line "$HOME/.profile" 1
-        for f in "$HOME/.bashrc" "$ZD/.zshrc"; do add_rc_line "$f" 0; done ;;
-    esac
-    # fish: a conf.d drop-in (the whole file is ours); written when fish is the login shell or already configured
-    if [ "$SH_NAME" = fish ] || [ -d "${XDG_CONFIG_HOME:-$HOME/.config}/fish" ]; then
-      mkdir -p "$(dirname "$FISH_CONF")" 2>/dev/null && {
-        [ -f "$FISH_CONF" ] && grep -Fq "consensus" "$FISH_CONF" || RC_EDITED="$RC_EDITED $FISH_CONF"
-        printf 'source "%s"  # consensus\n' "$(homevar "$ENV_FISH")" >"$FISH_CONF"
-      }
-    fi
-    edited_list=""
-    for f in $RC_EDITED; do edited_list="$edited_list${edited_list:+, }$(tilde "$f")"; done
-    if [ "$SH_NAME" = fish ]; then THIS_SHELL="source $(tilde "$ENV_FISH")"; else THIS_SHELL="source $(tilde "$ENV_FILE")"; fi
-    if [ -n "$RC_EDITED" ]; then
-      PATH_STATUS="added one line to $edited_list"
-      detail "PATH: $PATH_STATUS"
-      if [ "$ON_PATH" = 1 ]; then
-        detail "this terminal already has $(tilde "$BIN_DIR") on PATH"
-      else
-        detail "new terminals pick this up; for this one:  $THIS_SHELL"
-        PATH_HINT="this shell: $THIS_SHELL"
-      fi
-    elif [ -n "$RC_ALREADY" ]; then
-      PATH_STATUS="already set up in your shell rc files"
-      detail "PATH: $PATH_STATUS"
-      [ "$ON_PATH" = 1 ] || { detail "for this terminal:  $THIS_SHELL"; PATH_HINT="this shell: $THIS_SHELL"; }
-    else
-      PATH_STATUS="no shell rc file could be updated"
-      detail "PATH: $PATH_STATUS; add this line to your shell profile:  $RC_LINE"
-      PATH_HINT="add to your shell profile: export PATH=\"$(tilde "$BIN_DIR"):\$PATH\""
-    fi
-    [ -n "$RC_SKIPPED" ] && warn "left alone (symlink outside \$HOME, not a regular file, or not writable):$RC_SKIPPED"
-  else
+PATH_HINT=""
+PATH_STATUS=""
+ON_PATH=0
+case ":$PATH:" in *":$BIN_DIR:"*) ON_PATH=1 ;; esac
+FISH_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/fish/conf.d/consensus.fish"
+if [ "$MODIFY_PATH" = 1 ]; then
+  ZD="${ZDOTDIR:-$HOME}"
+  SH_NAME=$(user_shell)
+  case "$SH_NAME" in
+    zsh)
+      add_rc_line "$ZD/.zshrc" 1
+      add_rc_line "$ZD/.zprofile" 1
+      for f in "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.profile"; do add_rc_line "$f" 0; done ;;
+    bash)
+      add_rc_line "$HOME/.bashrc" 1
+      LOGIN_RC=""
+      for f in "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+        [ -e "$f" ] && { LOGIN_RC="$f"; break; }
+      done
+      [ -n "$LOGIN_RC" ] || { [ "$OS" = darwin ] && LOGIN_RC="$HOME/.bash_profile" || LOGIN_RC="$HOME/.profile"; }
+      add_rc_line "$LOGIN_RC" 1
+      for f in "$ZD/.zshrc" "$ZD/.zprofile"; do add_rc_line "$f" 0; done ;;
+    fish)
+      for f in "$HOME/.bashrc" "$HOME/.profile" "$ZD/.zshrc"; do add_rc_line "$f" 0; done ;;
+    *)
+      add_rc_line "$HOME/.profile" 1
+      for f in "$HOME/.bashrc" "$ZD/.zshrc"; do add_rc_line "$f" 0; done ;;
+  esac
+  # fish: a conf.d drop-in (the whole file is ours); written when fish is the login shell or already configured
+  if [ "$SH_NAME" = fish ] || [ -d "${XDG_CONFIG_HOME:-$HOME/.config}/fish" ]; then
+    mkdir -p "$(dirname "$FISH_CONF")" 2>/dev/null && {
+      [ -f "$FISH_CONF" ] && grep -Fq "consensus" "$FISH_CONF" || RC_EDITED="$RC_EDITED $FISH_CONF"
+      printf 'source "%s"  # consensus\n' "$(homevar "$ENV_FISH")" >"$FISH_CONF"
+    }
+  fi
+  edited_list=""
+  for f in $RC_EDITED; do edited_list="$edited_list${edited_list:+, }$(tilde "$f")"; done
+  if [ "$SH_NAME" = fish ]; then THIS_SHELL="source $(tilde "$ENV_FISH")"; else THIS_SHELL="source $(tilde "$ENV_FILE")"; fi
+  if [ -n "$RC_EDITED" ]; then
+    PATH_STATUS="added one line to $edited_list"
+    detail "PATH: $PATH_STATUS"
     if [ "$ON_PATH" = 1 ]; then
-      PATH_STATUS="PATH already includes $(tilde "$BIN_DIR"); no shell files changed"
+      detail "this terminal already has $(tilde "$BIN_DIR") on PATH"
     else
-      PATH_STATUS="PATH not changed (requested)"
-      PATH_HINT="add to your shell profile: export PATH=\"$(tilde "$BIN_DIR"):\$PATH\""
+      detail "new terminals pick this up; for this one:  $THIS_SHELL"
+      PATH_HINT="this shell: $THIS_SHELL"
     fi
-    detail "$PATH_STATUS${PATH_HINT:+. $PATH_HINT}"
+  elif [ -n "$RC_ALREADY" ]; then
+    PATH_STATUS="already set up in your shell rc files"
+    detail "PATH: $PATH_STATUS"
+    [ "$ON_PATH" = 1 ] || { detail "for this terminal:  $THIS_SHELL"; PATH_HINT="this shell: $THIS_SHELL"; }
+  else
+    PATH_STATUS="no shell rc file could be updated"
+    detail "PATH: $PATH_STATUS; add this line to your shell profile:  $RC_LINE"
+    PATH_HINT="add to your shell profile: export PATH=\"$(tilde "$BIN_DIR"):\$PATH\""
   fi
+  [ -n "$RC_SKIPPED" ] && warn "left alone (symlink outside \$HOME, not a regular file, or not writable):$RC_SKIPPED"
+else
+  if [ "$ON_PATH" = 1 ]; then
+    PATH_STATUS="PATH already includes $(tilde "$BIN_DIR"); no shell files changed"
+  else
+    PATH_STATUS="PATH not changed (requested)"
+    PATH_HINT="add to your shell profile: export PATH=\"$(tilde "$BIN_DIR"):\$PATH\""
+  fi
+  detail "$PATH_STATUS${PATH_HINT:+. $PATH_HINT}"
+fi
 
-  # ------------------------------------------------------------ receipt
-  STEP_NAME="write receipt"
-  RC_ALL=""
-  for f in "$HOME/.zshrc" "$HOME/.zprofile" "${ZDOTDIR:-$HOME}/.zshrc" "${ZDOTDIR:-$HOME}/.zprofile" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
-    case " $RC_ALL " in *" $f "*) continue ;; esac
-    [ -f "$f" ] && grep -Fq "$ENV_REF\"  # consensus" "$f" 2>/dev/null && RC_ALL="$RC_ALL $f"
-  done
-  [ -f "$FISH_CONF" ] && RC_ALL="$RC_ALL $FISH_CONF"
-  rc_json=""
-  for f in $RC_ALL; do rc_json="$rc_json${rc_json:+, }$(json_str "$f")"; done
-  cat >"$ROOT/receipt.json" <<EOF
+# ------------------------------------------------------------ receipt
+STEP_NAME="write receipt"
+RC_ALL=""
+for f in "$HOME/.zshrc" "$HOME/.zprofile" "${ZDOTDIR:-$HOME}/.zshrc" "${ZDOTDIR:-$HOME}/.zprofile" "$HOME/.bashrc" "$HOME/.bash_profile" "$HOME/.bash_login" "$HOME/.profile"; do
+  case " $RC_ALL " in *" $f "*) continue ;; esac
+  [ -f "$f" ] && grep -Fq "$ENV_REF\"  # consensus" "$f" 2>/dev/null && RC_ALL="$RC_ALL $f"
+done
+[ -f "$FISH_CONF" ] && RC_ALL="$RC_ALL $FISH_CONF"
+rc_json=""
+for f in $RC_ALL; do rc_json="$rc_json${rc_json:+, }$(json_str "$f")"; done
+cat >"$ROOT/receipt.json" <<EOF || die "cannot write $ROOT/receipt.json" 1
 {
   "kind": "standalone",
+  "channel": $(json_str "$([ "$MODE" = release ] && echo release || echo npm-fallback)"),
   "version": $(json_str "$NEW_VERSION"),
   "platform": $(json_str "$PLATFORM"),
   "sha256": $(json_str "$EXPECTED"),
-  "source": $(json_str "$BASE/$ASSET"),
+  "source": $(json_str "$SOURCE"),
   "installedAt": $(json_str "$(date -u +%Y-%m-%dT%H:%M:%SZ)"),
   "root": $(json_str "$ROOT"),
   "launcher": $(json_str "$LAUNCHER"),
@@ -663,28 +701,29 @@ else
 }
 EOF
 
-  # ------------------------------------------------------------ post-install check
-  STEP_NAME="post-install check"
-  "$LAUNCHER" --version >/dev/null 2>>"$LOG_FILE" || die "the installed launcher did not run: $LAUNCHER --version failed (see $LOG_FILE)" 1
-  info ""
-  if [ -n "$PREV_VERSION" ] && [ "$PREV_VERSION" != "$NEW_VERSION" ]; then
-    say "  ${GR}consensus $PREV_VERSION -> $NEW_VERSION${N}${B} installed in $(elapsed). Nothing was sent anywhere; there is no telemetry."
-  else
-    if [ "$PREV_SHA" = "$EXPECTED" ]; then
-    say "  ${GR}consensus $NEW_VERSION${N}${B} is already current (checked in $(elapsed)). Nothing was sent anywhere; there is no telemetry."
-  else
-    say "  ${GR}consensus $NEW_VERSION${N}${B} installed in $(elapsed). Nothing was sent anywhere; there is no telemetry."
-  fi
-  fi
+# ------------------------------------------------------------ post-install check
+STEP_NAME="post-install check"
+"$LAUNCHER" --version >/dev/null 2>>"$LOG_FILE" || die "the installed launcher did not run: $LAUNCHER --version failed (see $LOG_FILE)" 1
+info ""
+if [ -n "$PREV_VERSION" ] && [ "$PREV_VERSION" != "$NEW_VERSION" ]; then
+  say "  ${GR}consensus $PREV_VERSION -> $NEW_VERSION${N}${B} installed in $(elapsed). Nothing was sent anywhere; there is no telemetry."
+elif [ "$SKIPPED" = 1 ]; then
+  say "  ${GR}consensus $NEW_VERSION${N}${B} is already current (checked in $(elapsed)). Nothing was sent anywhere; there is no telemetry."
+else
+  say "  ${GR}consensus $NEW_VERSION${N}${B} installed in $(elapsed). Nothing was sent anywhere; there is no telemetry."
 fi
 
 # ================================================================ hand-off
 # exec below skips the EXIT trap, so clean up now
 [ -n "$TMP_DIR" ] && rm -rf "$TMP_DIR"
 TMP_DIR=""
+
+# A usable terminal: not --yes/CI, stdout+stderr are terminals, and /dev/tty can really be
+# opened. `[ -r /dev/tty ]` alone is true without a controlling terminal (docker, CI, ssh
+# host cmd), and `{ : </dev/tty; }` is fatal in dash when it fails (redirection error on a
+# special built-in), so probe by opening it in a subshell.
 can_prompt() {
-  [ -z "$YES" ] && [ -z "${CI:-}" ] && [ -t 1 ] && [ -t 2 ] &&
-    [ -r /dev/tty ] && [ -w /dev/tty ] && { : </dev/tty; } 2>/dev/null
+  [ -z "$YES" ] && [ -z "${CI:-}" ] && [ -t 1 ] && [ -t 2 ] && ( exec </dev/tty ) 2>/dev/null
 }
 
 CONSENSUS_INSTALLER=1
@@ -694,20 +733,20 @@ export CONSENSUS_PATH_HINT
 
 if [ "$RUN_SETUP" = 0 ]; then
   say "Next:"
+  [ -n "${PATH_HINT:-}" ] && info "$PATH_HINT"
   info "consensus setup      connect your subscriptions or keys, then ask the panel a question"
-  [ -n "${PATH_HINT:-}" ] && info "($PATH_HINT)"
   exit 0
 fi
 
 if [ "$HAD_CONFIG" = 1 ]; then
   say "Existing setup found in $(tilde "$CFG_DIR"): upgraded, not re-running the wizard. Checking it:"
   "$LAUNCHER" doctor || true
-  if [ -z "${PREV_SHA:-}" ] && [ "$MODE" = standalone ]; then
+  if [ "$PREV_RECEIPT" = 0 ]; then
     info "If your IDEs were wired to an older npm install, point them at this one:  consensus install"
   fi
   say "Upgrade complete."
+  [ -n "${PATH_HINT:-}" ] && info "$PATH_HINT"
   info "consensus setup      re-run the wizard any time"
-  [ -n "${PATH_HINT:-}" ] && info "($PATH_HINT)"
   exit 0
 fi
 
