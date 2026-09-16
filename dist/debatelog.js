@@ -31,8 +31,10 @@ export function formatRevision(label, panelist, r) {
 export function eventToMarkdown(e) {
     switch (e.type) {
         case "start": {
-            const labels = Object.entries(e.labels).map(([l, id]) => `${l} = ${id}`).join(", ");
-            return `# Debate ${e.runId}\n\n_Panel: ${labels}. Max rounds ${e.rounds}, effort ${e.effort}._\n\n## Problem\n\n${e.prompt}${e.context ? `\n\n### Context\n\n${e.context}` : ""}\n`;
+            const seats = e.seats?.length
+                ? e.seats.map((s) => `${s.label} = ${s.id} (effort ${s.effort ?? e.effort}${s.persona ? `, persona ${s.persona}` : ""})`).join(", ")
+                : Object.entries(e.labels).map(([l, id]) => `${l} = ${id}`).join(", ");
+            return `# Debate ${e.runId}\n\n_Seats: ${seats}. Max rounds ${e.rounds}._\n\n## Problem\n\n${e.prompt}${e.context ? `\n\n### Context\n\n${e.context}` : ""}\n`;
         }
         case "phase":
             return e.phase === "propose" ? `\n## Initial answers\n` : e.phase === "critique" ? `\n## Round ${e.round} — critiques\n` : e.phase === "revise" ? `\n## Round ${e.round} — revisions\n` : `\n## Synthesis\n`;

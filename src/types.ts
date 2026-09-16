@@ -26,6 +26,8 @@ export interface Usage {
   cacheReadTokens?: number;
   /** Cost as reported by the provider itself, when it reports one (Claude Code does). */
   costUsd?: number;
+  /** Internal: set once any real usage was recorded for this seat. */
+  reported?: boolean;
 }
 
 export interface CompletionResult {
@@ -128,7 +130,7 @@ export interface ConsensusRun {
 }
 
 export type ConsensusEvent =
-  | { type: "start"; runId: string; labels: Record<string, string>; prompt: string; context?: string; rounds: number; effort: Effort }
+  | { type: "start"; runId: string; labels: Record<string, string>; seats?: Seat[]; prompt: string; context?: string; rounds: number; effort: Effort }
   | { type: "phase"; phase: "propose" | "critique" | "revise" | "synthesize"; round?: number }
   | { type: "proposal"; label: string; panelist: string; text: string; reasoning?: string }
   | { type: "critique"; label: string; panelist: string; round: number; critique: Critique }

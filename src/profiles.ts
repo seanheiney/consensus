@@ -47,10 +47,14 @@ export function materializePreset(preset: Preset, statuses: VendorStatus[]): Pro
     if (panel.length < 2) return undefined;
     return { description: preset.description, panel, judge: base.replace(/#\w+$/, ""), rounds: preset.rounds, effort: preset.effort };
   }
+  const substitutions: string[] = [];
   if (preset.shape === "per-vendor") {
     for (const vendor of CATALOG_VENDORS) {
       const pick = pickSeatable(vendor, preset.tier!, statuses);
-      if (pick) panel.push(pick.spec(preset.effort));
+      if (pick) {
+        panel.push(pick.spec(preset.effort));
+        if (pick.substituted) substitutions.push(`${pick.model.id} instead of ${pick.substituted}`);
+      }
     }
   } else {
     for (const m of CATALOG[preset.vendor!]) {
@@ -59,7 +63,7 @@ export function materializePreset(preset: Preset, statuses: VendorStatus[]): Pro
     }
   }
   if (panel.length < 2) return undefined;
-  return { description: preset.description, panel, judge: panel[0]!.replace(/#\w+$/, ""), rounds: preset.rounds, effort: preset.effort };
+  return { description: preset.description, panel, judge: panel[0]!.replace(/#\w+$/, ""), rounds: preset.rounds, effort: preset.effort, ...(substitutions.length ? { substitutions } : {}) };
 }
 
 /** Every preset your connections can satisfy. */
@@ -248,6 +252,6 @@ export function memberLabel(m: Member): string {
 export function describeProfile(name: string, prof: Profile, active: boolean): string {
   const head = `${active ? "* " : "  "}${name}${prof.description ? `  — ${prof.description}` : ""}`;
   const body = prof.panel.map((s) => `      ${memberLabel(s)}`).join("\n");
-  const meta = `      judge ${prof.judge ?? memberLabel(prof.panel[0]!)}, rounds ${prof.rounds ?? 3}${prof.effort ? `, effort ${prof.effort}` : ""}`;
+  const meta = `      judge ${prof.judge ?? memberLabel(prof.panel[0]!)}, rounds ${prof.rounds ?? 3}${prof.effort ? `, effort ${prof.effort}` : ""}${prof.substitutions?.length ? `\n      substituted: ${prof.substitutions.join("; ")}` : ""}`;
   return `${head}\n${body}\n${meta}`;
 }

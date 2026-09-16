@@ -3,7 +3,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { createRequire } from "node:module";
 import { join } from "node:path";
-import { answerSection, estimateCost } from "./bench.js";
+import { answerSection } from "./bench.js";
+import { describeCost, estimateCost } from "./cost.js";
 import { loadConfig, resolveRun } from "./config.js";
 import { credentialEnv, loadCredentials } from "./credentials.js";
 import { openDebateLog } from "./debatelog.js";
@@ -109,7 +110,7 @@ export function createMcpServer(): McpServer {
         `# Unresolved disagreements\n\n${unresolved || "(none stated)"}`,
         `---`,
         `Panel: ${seats}. ${run.converged ? `Converged after ${run.rounds.length} round(s).` : `Did not fully converge after ${run.rounds.length} round(s).`}${Object.keys(run.dropped).length ? ` Dropped: ${Object.keys(run.dropped).join(", ")}.` : ""}`,
-        `Cost: ${cost.usd !== null ? `~$${cost.usd.toFixed(2)} at API list price` : "n/a"}${cost.unpriced.length ? ` (subscription seats not priced: ${cost.unpriced.join(", ")})` : ""}.`,
+        `Cost: ${describeCost(cost)}.`,
         saved ? `Full debate: ${saved}/debate.md  (or \`consensus log ${run.id}\`). Call again with transcript=true for the whole report.` : "",
       ]
         .filter(Boolean)

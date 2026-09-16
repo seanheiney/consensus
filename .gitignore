@@ -2,3 +2,4 @@ node_modules
 .consensus
 .env
 *.log
+.claude/worktrees/

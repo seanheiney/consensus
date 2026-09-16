@@ -59,7 +59,9 @@ node_ok || die "Node $MIN_NODE+ still not on PATH. Open a new terminal and re-ru
 info "node $(node -v), npm $(npm -v)"
 
 # Fallback until the npm release: install straight from the repo tarball (no git needed).
-REPO="${CONSENSUS_REPO:-https://github.com/seanheiney/consensus/archive/refs/heads/main.tar.gz}"
+# Pin a release with CONSENSUS_VERSION=v0.1.0 (a git tag); default is main.
+REF="${CONSENSUS_VERSION:+refs/tags/$CONSENSUS_VERSION}"; REF="${REF:-refs/heads/main}"
+REPO="${CONSENSUS_REPO:-https://github.com/seanheiney/consensus/archive/$REF.tar.gz}"
 say "Installing ${PKG}..."
 LOG=$(mktemp)
 try_install() { npm install -g "$1" >"$LOG" 2>&1; }

@@ -11,7 +11,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ChatMessage, CompletionRequest, CompletionResult, Effort, Panelist } from "../types.js";
+import type { ChatMessage, CompletionRequest, CompletionResult, Effort, Panelist, Usage } from "../types.js";
 
 /** A single headless call is killed after this long unless the caller overrides it. */
 export const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
@@ -170,9 +170,11 @@ export function createCodexCliPanelist(opts: CliPanelistOptions = {}): Panelist 
           "--ignore-rules",
           "--color", "never",
           "--disable", "shell_tool",
+          "--disable", "unified_exec",
           "--disable", "browser_use",
           "--disable", "computer_use",
           "--disable", "apps",
+          "--json",
           "-s", "read-only",
           "-c", `model_reasoning_effort="${effort}"`,
           "-c", "mcp_servers={}",
@@ -192,9 +194,21 @@ export function createCodexCliPanelist(opts: CliPanelistOptions = {}): Panelist 
             : /not logged in|login/i.test(msg) ? " Fix: `codex login`." : "";
           throw new Error(`codex produced no answer (exit ${res.code}): ${msg}${hint}`);
         }
-        // Codex prints only a combined "tokens used" total; we don't know the
-        // input/output split, so report no usage rather than a mislabeled number.
-        return { text };
+        // --json emits one JSON object per line; `turn.completed` carries the real usage split.
+        let usage: Usage | undefined;
+        for (const line of res.stdout.split("\n")) {
+          if (!line.startsWith("{")) continue;
+          try {
+            const ev = JSON.parse(line) as { type?: string; usage?: { input_tokens?: number; cached_input_tokens?: number; output_tokens?: number; reasoning_output_tokens?: number } };
+            if (ev.type === "turn.completed" && ev.usage) {
+              const cached = ev.usage.cached_input_tokens ?? 0;
+              usage = { inputTokens: Math.max(0, (ev.usage.input_tokens ?? 0) - cached), cacheReadTokens: cached, outputTokens: (ev.usage.output_tokens ?? 0) + (ev.usage.reasoning_output_tokens ?? 0) };
+            }
+          } catch {
+            /* not our line */
+          }
+        }
+        return { text, usage };
       });
     },
   };

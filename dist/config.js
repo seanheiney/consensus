@@ -29,6 +29,8 @@ export const ProfileSchema = z.object({
     effort: EffortSchema.optional(),
     /** Profile-local persona library: name -> prompt text. */
     personas: z.record(z.string(), z.string()).optional(),
+    /** Set by preset materialization when a tier model was replaced (e.g. gpt-6-astra on an old Codex). */
+    substitutions: z.array(z.string()).optional(),
 });
 export const ConfigSchema = z.object({
     /** Active profile name. */

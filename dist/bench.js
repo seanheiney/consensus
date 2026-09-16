@@ -8,7 +8,6 @@ import { join } from "node:path";
 import { z } from "zod";
 import { findCatalogModel } from "./catalog.js";
 import { PROVIDERS } from "./providers/index.js";
-import { SYSTEM_PROMPT, proposePrompt } from "./protocol/prompts.js";
 import { ConsensusEngine } from "./protocol/engine.js";
 import { extractJson } from "./protocol/json.js";
 import { parseSpec } from "./providers/index.js";
@@ -167,7 +166,9 @@ async function runOne(target, c, o, trial) {
     };
     try {
         if (target.single) {
-            const res = await target.single.complete({ system: SYSTEM_PROMPT, messages: [{ role: "user", content: proposePrompt(c.prompt, c.context) }], effort: target.effort, phase: "propose" });
+            // A clean baseline: no panel framing at all, just the question.
+            const plain = `${c.prompt.trim()}${c.context?.trim() ? `\n\nContext:\n${c.context.trim()}` : ""}`;
+            const res = await target.single.complete({ system: "You are a careful expert. Answer the question completely and give your reasoning.", messages: [{ role: "user", content: plain }], effort: target.effort, phase: "propose" });
             const usage = res.usage ?? { inputTokens: 0, outputTokens: 0 };
             const cost = estimateCost({ [target.single.id]: usage });
             return { ...base, ok: true, ms: Date.now() - t0, converged: false, rounds: 0, usage, costUsd: cost.usd, unpriced: cost.unpriced, dropped: [], answer: res.text };

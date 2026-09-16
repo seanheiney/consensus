@@ -3,15 +3,18 @@ export declare function priceFor(panelistId: string): {
     input: number;
     output: number;
 } | undefined;
-/**
- * Estimated list-price cost of a run. Subscription-backed seats don't bill per
- * token; this is the equivalent API price. A seat that reported no usage at all
- * (Codex only prints a combined total) is listed as unpriced, never as $0.
- */
-export declare function estimateCost(usage: Record<string, Usage>): {
+export declare function isSubscriptionSeat(panelistId: string): boolean;
+export interface CostEstimate {
+    /** What API-key seats will actually bill (list price). null when no API seat reported usage. */
     usd: number | null;
+    /** List-price equivalent of subscription (CLI) seats: quota, not a bill. null when none reported usage. */
+    subscriptionEquivUsd: number | null;
+    /** Seats that reported no usage or have no list price. */
     unpriced: string[];
-};
+}
+export declare function estimateCost(usage: Record<string, Usage>): CostEstimate;
+/** One line for humans. */
+export declare function describeCost(c: CostEstimate): string;
 export declare class CostLimitError extends Error {
     readonly spentUsd: number;
     readonly limitUsd: number;

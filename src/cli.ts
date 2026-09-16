@@ -3,13 +3,13 @@ import * as p from "@clack/prompts";
 import { Command, InvalidArgumentError } from "commander";
 import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { CATALOG, CATALOG_VENDORS, priceLabel, routeFor } from "./catalog.js";
+import { CATALOG, CATALOG_VENDORS, directRouteBlocker, priceLabel, routeFor } from "./catalog.js";
 import { loadConfig, loadUserConfig, resolveRun, saveUserConfig, type Config } from "./config.js";
 import { credentialEnv, loadCredentials } from "./credentials.js";
 import { createPack, describePack, diffPack, installPack, readPack, removePack } from "./packs.js";
 import { configWarnings } from "./config.js";
 import { ensureGitignore } from "./hosts.js";
-import { estimateCost } from "./bench.js";
+import { describeCost, estimateCost } from "./cost.js";
 import { probeSpecs, scanVendors } from "./doctor.js";
 import { installProjectMcp, installProjectSkills, listHosts, mcpLaunchCommand } from "./hosts.js";
 import { describeProfile, editProfile, materializePreset, memberLabel } from "./profiles.js";
@@ -112,6 +112,8 @@ program
       for (const w of configWarnings) log(yellow(`warning: ${w}`));
       const seats = r.panel.map((x) => `${x.id}${x.effort ? `#${x.effort}` : `#${r.effort}`}`).join(", ");
       const cliSeats = r.panel.filter((x) => ["claude", "codex", "gemini", "grok"].includes(x.provider)).length;
+      const shellKeys = [["claude", "ANTHROPIC_API_KEY"], ["codex", "OPENAI_API_KEY"], ["gemini", "GEMINI_API_KEY"], ["grok", "XAI_API_KEY"]].filter(([p, k]) => process.env[k!] && r.panel.some((x) => x.provider === p));
+      for (const [p, k] of shellKeys) log(yellow(`note: ${k} is set in your shell, so the ${p} seat will bill that API key, not your subscription`));
       log(dim(`panel${r.profile ? ` (${r.profile})` : ` (${r.source})`}: ${seats}`));
       const onPanel = r.panel.some((x) => x.id === r.judge.id);
       log(dim(`judge: ${r.judge.id}${onPanel ? "" : " (external, did not debate)"}  rounds: ${r.rounds}  cost: ${cliSeats === r.panel.length ? "subscription quota" : cliSeats ? "subscription quota + API tokens" : "API tokens"}; roughly ${r.panel.length * (1 + 2 * r.rounds)} model calls at most${o.maxCost ? `; ceiling $${o.maxCost}` : ""}`));
@@ -159,14 +161,11 @@ program
     }
     const out = o.json ? JSON.stringify(run, null, 2) : renderReport(run, { transcript: o.transcript });
     process.stdout.write(out + "\n");
+    const dropped = Object.keys(run.dropped);
+    if (dropped.length) process.exitCode = 2; // also under --quiet: scripts must see a degraded panel
     if (!o.quiet) {
-      const cost = estimateCost(run.usage);
-      const dropped = Object.keys(run.dropped);
-      if (dropped.length) {
-        log(yellow(`panel shrank: ${dropped.length} seat(s) dropped (${dropped.join(", ")}); ${run.seats.length - dropped.length} of ${run.seats.length} answered. Exit code 2.`));
-        process.exitCode = 2;
-      }
-      log(dim(`cost: ${cost.usd !== null ? `~$${cost.usd.toFixed(2)} at API list price` : "n/a"}${cost.unpriced.length ? ` (not priced: ${cost.unpriced.join(", ")})` : ""}${run.seats.some((s) => ["claude", "codex", "gemini", "grok"].includes(s.provider)) ? "; subscription seats bill quota, not tokens" : ""}`));
+      if (dropped.length) log(yellow(`panel shrank: ${dropped.length} seat(s) dropped (${dropped.join(", ")}); ${run.seats.length - dropped.length} of ${run.seats.length} answered. Exit code 2.`));
+      log(dim(`cost: ${describeCost(estimateCost(run.usage))}`));
     }
     if (o.output) await writeFile(o.output, out + "\n");
     if (o.save !== false) {
@@ -284,8 +283,11 @@ profile
     const statuses = await scanVendors(credentialEnv());
     for (const preset of PRESETS) {
       const prof = materializePreset(preset, statuses);
-      log(`${prof ? green(G.ok) : dim("○")} ${preset.name.padEnd(14)} ${preset.description}`);
-      if (prof) log(dim(`    ${prof.panel.join(", ")}  rounds ${prof.rounds}`));
+      log(`${prof ? green(G.ok) : dim(G.no)} ${preset.name.padEnd(14)} ${preset.description}`);
+      if (prof) {
+        log(dim(`    ${prof.panel.map(memberLabel).join(", ")}  rounds ${prof.rounds}`));
+        for (const n of prof.substitutions ?? []) log(yellow(`    substituted: ${n}`));
+      }
     }
     log(dim("\nconsensus profile create <name> --preset <preset>   creates one;  add --edit to tweak it first"));
   });
@@ -546,8 +548,9 @@ bench
 // ---- uninstall -----------------------------------------------------------
 program
   .command("uninstall")
-  .description("remove the MCP registration and skill packs from every host, and optionally your config and saved keys")
+  .description("remove the MCP registration and skill packs from every host, and optionally your config and saved keys (non-interactive; --yes accepted for symmetry)")
   .option("--purge", "also delete ~/.config/consensus (profiles, packs, saved API keys)")
+  .option("-y, --yes", "no-op: uninstall never prompts")
   .action(async (o: { purge?: boolean }) => {
     for (const h of listHosts().filter((x) => x.detected && x.uninstall)) {
       try {
@@ -578,8 +581,9 @@ program
       log(bold(`${v.label}`) + "  " + (s.connected ? green(`connected via ${s.spec}`) : or.connected ? yellow("via OpenRouter") : dim("not connected")));
       for (const m of CATALOG[vendor]) {
         const r = routeFor(vendor, m, statuses);
+        const blocker = directRouteBlocker(vendor, m, statuses);
         const spec = r ? `${r.provider}:${r.model}` : `${v.api}:${m.id}`;
-        log(`  ${spec.padEnd(40)} ${priceLabel(m).padEnd(18)} ${dim(m.tier)}${m.note ? dim(`  ${m.note}`) : ""}`);
+        log(`  ${spec.padEnd(40)} ${priceLabel(m).padEnd(18)} ${dim(m.tier)}${blocker ? yellow(`  cannot run here: ${blocker}`) : !r ? dim("  not connected") : ""}${m.note && !blocker ? dim(`  ${m.note}`) : ""}`);
       }
     }
     log(bold("OpenRouter") + "  " + (or.connected ? green("connected (OPENROUTER_API_KEY)") : dim("not connected; any openrouter:<vendor>/<model> id works once a key is set")));

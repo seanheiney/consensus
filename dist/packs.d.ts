@@ -24,6 +24,7 @@ export declare const PackSchema: z.ZodObject<{
             medium: "medium";
         }>>;
         personas: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        substitutions: z.ZodOptional<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>>;
     suite: z.ZodOptional<z.ZodObject<{
         name: z.ZodOptional<z.ZodString>;

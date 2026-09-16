@@ -10,12 +10,15 @@ export function renderReport(run, opts = {}) {
     const status = run.converged
         ? `converged after ${rounds} round${rounds === 1 ? "" : "s"}`
         : `did not fully converge after ${rounds} round${rounds === 1 ? "" : "s"}`;
+    const judgeOnPanel = run.seats.some((s) => s.id === run.judge);
     const lines = [
         run.synthesis,
         "",
         "---",
         "",
-        `_Panel ${status}. Panelists: ${panel}. Synthesized by ${run.judge}. Run ${run.id}._`,
+        `_Panel ${status}. Panelists: ${panel}. Synthesized by ${run.judge}${judgeOnPanel ? " (a panelist; pass --judge external:<spec> for a judge that did not debate)" : " (external judge, did not debate)"}. Run ${run.id}._`,
+        "",
+        `_"Converged" means every seat accepted every other seat's answer as substantively equivalent: self-reported agreement, not verified correctness. Confidence is the judge's own estimate._`,
     ];
     if (Object.keys(run.dropped).length) {
         lines.push("", "**Dropped panelists:**");

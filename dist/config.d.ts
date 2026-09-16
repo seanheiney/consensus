@@ -27,6 +27,7 @@ export declare const ProfileSchema: z.ZodObject<{
         medium: "medium";
     }>>;
     personas: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    substitutions: z.ZodOptional<z.ZodArray<z.ZodString>>;
 }, z.core.$strip>;
 export type Profile = z.infer<typeof ProfileSchema>;
 export declare const ConfigSchema: z.ZodObject<{
@@ -47,6 +48,7 @@ export declare const ConfigSchema: z.ZodObject<{
             medium: "medium";
         }>>;
         personas: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        substitutions: z.ZodOptional<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>>>;
     personas: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     packs: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodObject<{

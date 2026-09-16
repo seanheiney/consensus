@@ -12,6 +12,7 @@ describe("bench", () => {
     expect(usd).toBeCloseTo(5 + 2.5 + 1, 5);
     expect(unpriced).toEqual(["claude"]);
     expect(estimateCost({ claude: { inputTokens: 1, outputTokens: 1 } }).usd).toBeNull();
+    expect(estimateCost({ "codex:gpt-5.6-sol": { inputTokens: 1_000_000, outputTokens: 0 } })).toMatchObject({ usd: null, subscriptionEquivUsd: 4 });
   });
 
   it("the starter suite validates and mixes objective and judgment cases", () => {

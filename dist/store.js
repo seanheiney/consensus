@@ -2,13 +2,25 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { ensureGitignore } from "./hosts.js";
+import { resolve, dirname as pdirname } from "node:path";
+function findGitRoot(from = process.cwd()) {
+    let d = resolve(from);
+    for (;;) {
+        if (existsSync(join(d, ".git")))
+            return d;
+        const up = pdirname(d);
+        if (up === d)
+            return undefined;
+        d = up;
+    }
+}
 import { renderReport } from "./report.js";
 /** Persist a run as JSON + markdown under `<dir>/<run id>/`. Returns the run directory. */
 export async function saveRun(run, dir = ".consensus/runs") {
     const runDir = join(dir, run.id);
     await mkdir(runDir, { recursive: true });
-    // Saved debates contain verbatim prompts and pasted context: keep them out of git.
-    if (dir === ".consensus/runs" && existsSync(".git"))
+    // Saved debates contain verbatim prompts and pasted context: keep them out of git (any repo we are inside).
+    if (dir === ".consensus/runs" && findGitRoot())
         await ensureGitignore().catch(() => undefined);
     await Promise.all([
         writeFile(join(runDir, "run.json"), JSON.stringify(run, null, 2)),
@@ -66,7 +78,7 @@ export function markdownToHtml(md) {
         out.push("</table>");
         inTable = false;
     } };
-    const inline = (t) => esc(t).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/_([^_]+)_/g, "<em>$1</em>");
+    const inline = (t) => esc(t).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, "$1<em>$2</em>").replace(/(^|[^\w])_([^_\n]+)_(?!\w)/g, "$1<em>$2</em>");
     for (const raw of lines) {
         if (raw.startsWith("```")) {
             closeList();

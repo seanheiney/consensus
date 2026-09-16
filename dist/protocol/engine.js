@@ -7,6 +7,7 @@ const LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 function addUsage(a, b) {
     if (!b)
         return;
+    a.reported = true;
     a.inputTokens += b.inputTokens;
     a.outputTokens += b.outputTokens;
     if (b.cacheReadTokens)
@@ -76,7 +77,7 @@ export class ConsensusEngine {
             usage: {},
             dropped: {},
         };
-        this.emit({ type: "start", runId: run.id, labels: run.labels, prompt, context, rounds, effort });
+        this.emit({ type: "start", runId: run.id, labels: run.labels, seats: run.seats, prompt, context, rounds, effort });
         // ---- Phase 1: independent proposals -------------------------------
         this.emit({ type: "phase", phase: "propose" });
         await this.forEachActive(states, "propose", async (s) => {
@@ -176,7 +177,8 @@ export class ConsensusEngine {
         run.synthesis = synthesis.trim();
         this.emit({ type: "synthesis", panelist: synthesizer.panelist.id, text: run.synthesis });
         for (const s of states)
-            run.usage[s.panelist.id] = s.usage;
+            if (s.usage.reported)
+                run.usage[s.panelist.id] = { ...s.usage, reported: undefined };
         run.finishedAt = new Date().toISOString();
         this.emit({ type: "done", run });
         return run;

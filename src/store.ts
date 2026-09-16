@@ -2,6 +2,17 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { ensureGitignore } from "./hosts.js";
+import { resolve, dirname as pdirname } from "node:path";
+
+function findGitRoot(from = process.cwd()): string | undefined {
+  let d = resolve(from);
+  for (;;) {
+    if (existsSync(join(d, ".git"))) return d;
+    const up = pdirname(d);
+    if (up === d) return undefined;
+    d = up;
+  }
+}
 import type { ConsensusRun } from "./types.js";
 import { renderReport } from "./report.js";
 
@@ -9,8 +20,8 @@ import { renderReport } from "./report.js";
 export async function saveRun(run: ConsensusRun, dir = ".consensus/runs"): Promise<string> {
   const runDir = join(dir, run.id);
   await mkdir(runDir, { recursive: true });
-  // Saved debates contain verbatim prompts and pasted context: keep them out of git.
-  if (dir === ".consensus/runs" && existsSync(".git")) await ensureGitignore().catch(() => undefined);
+  // Saved debates contain verbatim prompts and pasted context: keep them out of git (any repo we are inside).
+  if (dir === ".consensus/runs" && findGitRoot()) await ensureGitignore().catch(() => undefined);
   await Promise.all([
     writeFile(join(runDir, "run.json"), JSON.stringify(run, null, 2)),
     writeFile(join(runDir, "report.md"), renderReport(run, { transcript: true })),
@@ -71,7 +82,7 @@ export function markdownToHtml(md: string): string {
   let inTable = false;
   const closeList = () => { if (inList) { out.push("</ul>"); inList = false; } };
   const closeTable = () => { if (inTable) { out.push("</table>"); inTable = false; } };
-  const inline = (t: string) => esc(t).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/_([^_]+)_/g, "<em>$1</em>");
+  const inline = (t: string) => esc(t).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, "$1<em>$2</em>").replace(/(^|[^\w])_([^_\n]+)_(?!\w)/g, "$1<em>$2</em>");
   for (const raw of lines) {
     if (raw.startsWith("```")) { closeList(); closeTable(); out.push(inCode ? "</code></pre>" : "<pre><code>"); inCode = !inCode; continue; }
     if (inCode) { out.push(esc(raw)); continue; }

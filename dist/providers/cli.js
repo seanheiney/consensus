@@ -144,9 +144,11 @@ export function createCodexCliPanelist(opts = {}) {
                     "--ignore-rules",
                     "--color", "never",
                     "--disable", "shell_tool",
+                    "--disable", "unified_exec",
                     "--disable", "browser_use",
                     "--disable", "computer_use",
                     "--disable", "apps",
+                    "--json",
                     "-s", "read-only",
                     "-c", `model_reasoning_effort="${effort}"`,
                     "-c", "mcp_servers={}",
@@ -167,9 +169,23 @@ export function createCodexCliPanelist(opts = {}) {
                         : /not logged in|login/i.test(msg) ? " Fix: `codex login`." : "";
                     throw new Error(`codex produced no answer (exit ${res.code}): ${msg}${hint}`);
                 }
-                // Codex prints only a combined "tokens used" total; we don't know the
-                // input/output split, so report no usage rather than a mislabeled number.
-                return { text };
+                // --json emits one JSON object per line; `turn.completed` carries the real usage split.
+                let usage;
+                for (const line of res.stdout.split("\n")) {
+                    if (!line.startsWith("{"))
+                        continue;
+                    try {
+                        const ev = JSON.parse(line);
+                        if (ev.type === "turn.completed" && ev.usage) {
+                            const cached = ev.usage.cached_input_tokens ?? 0;
+                            usage = { inputTokens: Math.max(0, (ev.usage.input_tokens ?? 0) - cached), cacheReadTokens: cached, outputTokens: (ev.usage.output_tokens ?? 0) + (ev.usage.reasoning_output_tokens ?? 0) };
+                        }
+                    }
+                    catch {
+                        /* not our line */
+                    }
+                }
+                return { text, usage };
             });
         },
     };

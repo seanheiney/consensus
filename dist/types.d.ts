@@ -22,6 +22,8 @@ export interface Usage {
     cacheReadTokens?: number;
     /** Cost as reported by the provider itself, when it reports one (Claude Code does). */
     costUsd?: number;
+    /** Internal: set once any real usage was recorded for this seat. */
+    reported?: boolean;
 }
 export interface CompletionResult {
     text: string;
@@ -123,6 +125,7 @@ export type ConsensusEvent = {
     type: "start";
     runId: string;
     labels: Record<string, string>;
+    seats?: Seat[];
     prompt: string;
     context?: string;
     rounds: number;

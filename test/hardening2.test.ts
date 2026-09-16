@@ -23,9 +23,16 @@ describe("spend ceiling", () => {
     const a = pricey("anthropic:claude-opus-5");
     const b = pricey("openai:gpt-6-astra");
     await expect(new ConsensusEngine({ panel: [a, b], maxCostUsd: 1 }).run("q")).rejects.toBeInstanceOf(CostLimitError);
+    // the same spend on subscription seats never trips the ceiling
+    const subA = pricey("claude:claude-opus-5");
+    const subB = pricey("codex:gpt-5.6-sol");
+    await expect(new ConsensusEngine({ panel: [subA, subB], maxCostUsd: 1 }).run("q")).resolves.toBeDefined();
     expect(estimateCost({ "anthropic:claude-opus-5": { inputTokens: 1_000_000, outputTokens: 0 } }).usd).toBe(5);
-    expect(estimateCost({ "claude:claude-opus-5": { inputTokens: 0, outputTokens: 0 } })).toEqual({ usd: null, unpriced: ["claude:claude-opus-5"] });
-    expect(estimateCost({ "claude:x": { inputTokens: 1, outputTokens: 1, costUsd: 0.42 } }).usd).toBe(0.42);
+    expect(estimateCost({ "claude:claude-opus-5": { inputTokens: 0, outputTokens: 0 } })).toEqual({ usd: null, subscriptionEquivUsd: null, unpriced: ["claude:claude-opus-5"] });
+    // subscription seats are quota, never billed: they must not count toward --max-cost
+    const sub = estimateCost({ "claude:x": { inputTokens: 1, outputTokens: 1, costUsd: 0.42 } });
+    expect(sub.usd).toBeNull();
+    expect(sub.subscriptionEquivUsd).toBe(0.42);
   });
 });
 
