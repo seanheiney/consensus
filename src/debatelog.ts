@@ -58,6 +58,8 @@ export function eventToMarkdown(e: ConsensusEvent): string | undefined {
       if (m.request_extra_round) lines.push("", "_The captain asked for one extra round._");
       return lines.join("\n") + "\n";
     }
+    case "handoff":
+      return `\n_${e.label === "captain" ? "Captain" : `Seat ${e.label}`} ${e.from} was unavailable during ${e.phase} (${e.error}); ${e.to} took over._\n`;
     case "extra-round":
       return `\n_Captain ${e.panelist} granted one extra round after round ${e.round}._\n`;
     case "converged":

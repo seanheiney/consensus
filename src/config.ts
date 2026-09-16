@@ -5,10 +5,11 @@ import type { Effort, Panelist } from "./types.js";
 import { configDir } from "./credentials.js";
 import { createPanelist, parseSpec, specId, type ParsedSpec } from "./providers/index.js";
 import { resolvePersona, withPersona } from "./personas.js";
-import { CATALOG_VENDORS, findCatalogModel, pickSeatable, routeFor } from "./catalog.js";
+import { CATALOG, CATALOG_VENDORS, findCatalogModel, pickSeatable, routeFor, specFor } from "./catalog.js";
 import { formatSpec } from "./providers/index.js";
 import type { VendorStatus } from "./doctor.js";
 import { scanVendors } from "./doctor.js";
+import { withFallbacks } from "./fallback.js";
 
 const EffortSchema = z.enum(["low", "medium", "high", "xhigh", "max"]);
 
@@ -161,6 +162,8 @@ export interface ResolveOptions {
   rounds?: number;
   effort?: Effort;
   env?: NodeJS.ProcessEnv;
+  /** Called when the auto captain hands off to a stand-in (usage limit, model unavailable). */
+  onCaptainSwitch?: (from: Panelist, to: Panelist, error: string) => void;
 }
 
 export interface ResolvedRun {
@@ -254,6 +257,27 @@ export async function autoCaptain(members: Member[], statuses: VendorStatus[], m
 }
 
 /**
+ * The captain plus up to three stand-ins, strongest first, so a captain that hits a usage
+ * limit (or is otherwise unavailable) hands off instead of sinking the debate.
+ */
+export async function captainCandidates(members: Member[], statuses: VendorStatus[], mode: "auto" | "neutral" = "auto"): Promise<string[]> {
+  const first = await autoCaptain(members, statuses, mode);
+  const out = [first];
+  const modelOf = (spec: string) => spec.replace(/#\w+$/, "").split(":").slice(1).join(":").split("/").pop()!;
+  for (const tier of ["frontier", "standard"] as const) {
+    for (const vendor of CATALOG_VENDORS) {
+      for (const m of CATALOG[vendor].filter((x) => x.tier === tier)) {
+        if (out.length >= 4) return out;
+        const spec = specFor(vendor, m, statuses, "high");
+        if (!spec || out.some((o) => modelOf(o) === modelOf(spec) || o === spec)) continue;
+        out.push(spec);
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Pick a judge that did not debate: the strongest seatable model of a vendor
  * that is NOT on the panel; failing that, a different model of a vendor that is.
  */
@@ -335,15 +359,28 @@ export async function resolveRun(o: ResolveOptions): Promise<ResolvedRun> {
   const makeCaptain = async (spec: string | undefined, members: Member[], effort: Effort | undefined): Promise<Panelist | undefined> => {
     const want = spec ?? "auto";
     if (want === "none") return undefined;
-    let concrete = want === "auto" || want === "neutral" ? await autoCaptain(members, await scan(), want) : want;
-    if (concrete.startsWith("any:")) {
-      const [m] = resolvePortableMembers([concrete], await scan());
-      concrete = typeof m === "string" ? m : m!.model;
+    const build = async (spec: string): Promise<Panelist> => {
+      let concrete = spec;
+      if (concrete.startsWith("any:")) {
+        const [m] = resolvePortableMembers([concrete], await scan());
+        concrete = typeof m === "string" ? m : m!.model;
+      }
+      const { spec: base, persona, name } = splitMember(concrete);
+      let p = createPanelist(parseSpec(base), { effort: effort ?? "high", env });
+      if (persona) p = withPersona(p, resolvePersona(persona, library, name));
+      return p;
+    };
+    if (want !== "auto" && want !== "neutral") return build(want);
+    const specs = await captainCandidates(members, await scan(), want);
+    const built: Panelist[] = [];
+    for (const sp of specs) {
+      try {
+        built.push(await build(sp));
+      } catch {
+        /* a stand-in that cannot be constructed is skipped */
+      }
     }
-    const { spec: base, persona, name } = splitMember(concrete);
-    let p = createPanelist(parseSpec(base), { effort: effort ?? "high", env });
-    if (persona) p = withPersona(p, resolvePersona(persona, library, name));
-    return p;
+    return withFallbacks(built, o.onCaptainSwitch);
   };
   const concrete = async (members: Member[]): Promise<Member[]> => (hasPortable(members) ? resolvePortableMembers(members, await scan()) : members);
   const concreteJudge = async (spec: string | undefined, members?: Member[]): Promise<string | undefined> => {

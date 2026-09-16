@@ -259,9 +259,9 @@ export class ConsensusEngine {
     if (external && !states.includes(external)) states.push(external);
 
     const synthesisSystem = captain && synthesizer.panelist.id === captain.id ? CAPTAIN_PROMPT : SYSTEM_PROMPT;
-    const synthesis = await this.callWith(
-      synthesizer,
-      synthesisSystem,
+    const synthesize = (who: PanelistState, system: string) => this.callWith(
+      who,
+      system,
       [
         {
           role: "user",
@@ -287,11 +287,26 @@ export class ConsensusEngine {
       ],
       "synthesize",
     );
+    let synthesis: string;
+    let writer = synthesizer;
+    try {
+      synthesis = await synthesize(synthesizer, synthesisSystem);
+    } catch (err) {
+      // The reporter failed outright (every stand-in too): a seat that argued the case writes the report rather than losing the debate.
+      const seat = synthesizer === external ? this.active(states).find((x) => x !== external) : undefined;
+      if (!seat || this.opts.signal?.aborted) throw err;
+      this.emit({ type: "panelist:error", label: synthesizer.label, panelist: synthesizer.panelist.id, phase: "synthesize", error: `${(err as Error).message.split("\n")[0]} (seat ${seat.label} writes the report instead)`, dropped: false });
+      writer = seat;
+      synthesis = await synthesize(seat, SYSTEM_PROMPT);
+    }
+    run.judge = writer.panelist.id;
     run.synthesis = synthesis.trim();
-    this.emit({ type: "synthesis", panelist: synthesizer.panelist.id, text: run.synthesis });
+    this.emit({ type: "synthesis", panelist: writer.panelist.id, text: run.synthesis });
 
     for (const s of states) if (s.usage.reported) run.usage[s.panelist.id] = { ...s.usage, reported: undefined, billing: s.panelist.billing };
     if (this.captainState?.usage.reported && !run.usage[this.captainState.panelist.id]) run.usage[this.captainState.panelist.id] = { ...this.captainState.usage, reported: undefined, billing: this.captainState.panelist.billing };
+    for (const [id, u] of Object.entries(this.retiredUsage)) if (!run.usage[id]) run.usage[id] = u;
+    if (captain) run.captain = captain.id;
     const c = estimateCost(run.usage);
     run.cost = { billedUsd: c.usd, subscriptionEquivUsd: c.subscriptionEquivUsd, unpriced: c.unpriced, summary: describeCost(c) };
     run.finishedAt = new Date().toISOString();
@@ -416,8 +431,10 @@ export class ConsensusEngine {
     }
   }
 
-  private async callWith(s: PanelistState, system: string, messages: ChatMessage[], phase: CompletionRequest["phase"], json = false, jsonSchema?: Record<string, unknown>): Promise<string> {
-    const res = await s.panelist.complete({
+  private retiredUsage: Record<string, Usage> = {};
+
+  private completeFor(s: PanelistState, system: string, messages: ChatMessage[], phase: CompletionRequest["phase"], json: boolean, jsonSchema?: Record<string, unknown>) {
+    return s.panelist.complete({
       system,
       messages,
       json,
@@ -427,6 +444,23 @@ export class ConsensusEngine {
       signal: this.opts.signal,
       phase,
     });
+  }
+
+  private async callWith(s: PanelistState, system: string, messages: ChatMessage[], phase: CompletionRequest["phase"], json = false, jsonSchema?: Record<string, unknown>): Promise<string> {
+    const before = s.panelist.id;
+    const beforeBilling = s.panelist.billing;
+    const priorUsage = { ...s.usage };
+    let res;
+    try {
+      res = await this.completeFor(s, system, messages, phase, json, jsonSchema);
+    } finally {
+      if (s.panelist.id !== before) {
+        // A fallback panelist handed off: keep what the previous model spent under its own id.
+        if (priorUsage.reported) this.retiredUsage[before] = { ...priorUsage, reported: undefined, billing: beforeBilling };
+        s.usage = { inputTokens: 0, outputTokens: 0 };
+        this.emit({ type: "handoff", label: s.label, from: before, to: s.panelist.id, phase: phase ?? "call", error: "previous model unavailable (usage limit or error)" });
+      }
+    }
     addUsage(s.usage, res.usage);
     if (res.servedBy && res.servedBy !== s.panelist.model) this.emit({ type: "served-by", label: s.label, panelist: s.panelist.id, model: res.servedBy, phase: phase ?? "call" });
     if (phase === "propose" && res.reasoning) s.reasoning = res.reasoning;

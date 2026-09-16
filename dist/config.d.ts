@@ -103,6 +103,8 @@ export interface ResolveOptions {
     rounds?: number;
     effort?: Effort;
     env?: NodeJS.ProcessEnv;
+    /** Called when the auto captain hands off to a stand-in (usage limit, model unavailable). */
+    onCaptainSwitch?: (from: Panelist, to: Panelist, error: string) => void;
 }
 export interface ResolvedRun {
     panel: Panelist[];
@@ -132,6 +134,11 @@ export declare function buildPanel(members: Member[], defaultEffort: Effort | un
  * vendor that is not on the panel.
  */
 export declare function autoCaptain(members: Member[], statuses: VendorStatus[], mode?: "auto" | "neutral"): Promise<string>;
+/**
+ * The captain plus up to three stand-ins, strongest first, so a captain that hits a usage
+ * limit (or is otherwise unavailable) hands off instead of sinking the debate.
+ */
+export declare function captainCandidates(members: Member[], statuses: VendorStatus[], mode?: "auto" | "neutral"): Promise<string[]>;
 /**
  * Pick a judge that did not debate: the strongest seatable model of a vendor
  * that is NOT on the panel; failing that, a different model of a vendor that is.

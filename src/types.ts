@@ -179,6 +179,7 @@ export type ConsensusEvent =
   | { type: "synthesis"; panelist: string; text: string }
   | { type: "moderation"; panelist: string; round: number; moderation: Moderation }
   | { type: "extra-round"; panelist: string; round: number }
+  | { type: "handoff"; label: string; from: string; to: string; phase: string; error: string }
   | { type: "panelist:start"; label: string; panelist: string; phase: string }
   | { type: "panelist:done"; label: string; panelist: string; phase: string; ms: number; usage?: Usage }
   | { type: "panelist:error"; label: string; panelist: string; phase: string; error: string; dropped: boolean }

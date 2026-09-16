@@ -29,6 +29,9 @@ export function progressLogger(quiet = false): (e: ConsensusEvent) => void {
       case "moderation":
         log(`  ${G.step} captain ${e.panelist}: ${e.moderation.settled.length} settled, ${e.moderation.key_disputes.length} dispute(s) carried, ${e.moderation.key_disputes.filter((d) => d.ruling).length} ruling(s)${e.moderation.questions_for_seats?.length ? `, ${e.moderation.questions_for_seats.length} question(s) to seats` : ""}`);
         break;
+      case "handoff":
+        log(yellow(`  ${e.label} ${e.from} unavailable during ${e.phase}; handed off to ${e.to}`));
+        break;
       case "extra-round":
         log(yellow(`  captain ${e.panelist} granted one extra round after round ${e.round}`));
         break;

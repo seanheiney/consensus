@@ -56,6 +56,15 @@ describe("judges", () => {
     expect(await autoCaptain(["claude:claude-fable-5-1", "codex:gpt-6-astra"], st)).toBe("claude:claude-fable-5-1#high");
     expect(await autoCaptain(["claude:claude-fable-5-1", "codex:gpt-6-astra"], st, "neutral")).toMatch(/^openrouter:google\//);
   });
+  it("auto captain carries ordered stand-ins across vendors", async () => {
+    const { captainCandidates } = await import("../src/config.js");
+    const st = [status("anthropic", "claude", "cli"), status("openai", "codex", "cli", "0.160.0"), status("google", undefined), status("xai", undefined), status("openrouter", undefined)];
+    const c = await captainCandidates(["claude:claude-opus-5", "codex:gpt-5.6-sol"], st);
+    expect(c[0]).toBe("claude:claude-fable-5-1#high");
+    expect(c[1]).toMatch(/^codex:gpt-6-astra/);
+    expect(c).toContain("claude:claude-opus-5#high");
+    expect(new Set(c).size).toBe(c.length);
+  });
   it("external:auto prefers a vendor that is not on the panel", async () => {
     const st = [status("anthropic", "claude", "cli"), status("openai", "codex", "cli", "0.160.0"), status("google", undefined), status("xai", undefined), status("openrouter", "openrouter", "api")];
     const j = await autoExternalJudge(["claude:claude-opus-5", "codex:gpt-5.6-sol"], st);

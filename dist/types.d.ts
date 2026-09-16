@@ -218,6 +218,13 @@ export type ConsensusEvent = {
     panelist: string;
     round: number;
 } | {
+    type: "handoff";
+    label: string;
+    from: string;
+    to: string;
+    phase: string;
+    error: string;
+} | {
     type: "panelist:start";
     label: string;
     panelist: string;
