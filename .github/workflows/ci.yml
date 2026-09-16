@@ -21,7 +21,8 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - name: committed dist matches src
-        run: git diff --exit-code -- dist ':!dist/build-info.json' || (echo "dist/ is stale: run pnpm build and commit" && exit 1)
+        run: |
+          git diff --exit-code -- dist ':!dist/build-info.json' || (echo "dist/ is stale, run pnpm build and commit" && exit 1)
       - run: npm pack --dry-run
       - run: node dist/cli.js --help
       - run: node dist/cli.js bogus && exit 1 || true   # a bare word must be refused, never run
