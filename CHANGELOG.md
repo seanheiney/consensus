@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-16
+
+### Added
+- Captain: a designated model moderates each round, referees disputes, puts direct questions to seats, may grant one extra round, and writes the report. `auto` (best available model, as its own thread even if a seat uses it), `neutral` (prefer an off-panel vendor), a spec, or `none`.
+- The auto captain carries ordered stand-ins: when its model hits a usage limit it hands off (logged as a handoff) instead of failing the debate; if every stand-in fails a seat writes the report.
+- Natural-language panel designer (`consensus profile design`, MCP `consensus_design`).
+- Bench control arms: `--baseline` and `--self-consistency spec[xN]`; per-case paired win/loss cells; debate-activity counts; `suites/judgment.json`.
+
 ### Added
 - One-paste standalone install: release archives with the official Node 22 runtime and the CLI bundled into one file (`scripts/bundle.mjs`, `scripts/package.mjs`), built for macOS arm64/x64, Linux x64/arm64 and Windows x64/arm64 with `SHA256SUMS` and build-provenance attestations (`release.yml`).
 - `install.sh` rewrite: no Node, npm or sudo; Rosetta and musl detection; curl or wget with progress; sha256 verification; `~/.consensus/versions/<ver>` + `current`; `~/.local/bin/consensus`; `~/.consensus/env` + one guarded rc line (zsh, bash, fish, sh); receipt; step counter and elapsed time; `exec setup </dev/tty` on a fresh install, `doctor` on upgrade, instructions without a terminal; `--version`, `--dir`, `--no-modify-path`, `--allow-root`, `--dry-run`, `CONSENSUS_DOWNLOAD_BASE`. Until a release exists it falls back to a private Node + npm prefix install (no brew/fnm/nvm/global npm).
