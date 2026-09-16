@@ -466,3 +466,36 @@ Saved keys are handed only to the matching API client and are **never** exported
 | `0` | Success. |
 | `1` | Error: bad flags, unreachable seats at pre-flight, spend ceiling hit, no prompt, unknown profile or persona. |
 | `2` | The run finished, but the panel shrank — one or more seats were dropped after failing. The report names them. |
+
+## Design a panel from a brief
+
+Describe the panel you want and let your strongest connected model draft it:
+
+```bash
+consensus profile design "5 panelists: a security expert, a distributed-systems engineer, a PM, a skeptic and a cost hawk; frontier models; 3 rounds"
+consensus profile design                    # asks: how many, what expertise, frontier or commodity, rounds
+consensus profile design "…" --no-llm       # template personas, no model call
+consensus profile design "…" --tier commodity --name cheap-council --yes
+```
+
+The designer reuses built-in personas when they fit, writes new ones for other expertise (shown in full before saving), seats them across the vendors you have connected so the panel is as diverse as your connections allow, and defaults the judge to `external:auto` (a model that did not debate). The same is available to agents as the MCP tool `consensus_design`.
+
+## Guardrails and reproducibility (reference)
+
+| Flag / setting | Effect |
+|---|---|
+| `--max-cost <usd>` | Abort when spend billed to API keys exceeds this. Subscription seats are quota and never count. The partial debate is saved (exit code 3). |
+| `--timeout <minutes>` | Kill any single model call after this long (default 20). SIGTERM, then SIGKILL after 10 s. |
+| `--no-retry` | Do not retry a seat once on a transient failure (rate limit, overload, timeout). |
+| `--force` | Run even if pre-flight finds a seat that cannot be reached (it will be dropped). |
+| `--seed <n>` | Seed for label assignment and answer ordering; recorded in `run.json` under `options.seed`. Reuse it to reproduce a run's shuffles. |
+| `--judge external:<spec>` / `external:auto` | A judge that did not debate. `auto` picks the strongest seatable model of a vendor not on the panel. |
+| `#xhigh` | Effort rung between high and max; Claude, OpenAI and Codex honour it, other routes map it to high. |
+| Exit codes | 0 ok · 1 error · 2 a seat was dropped (panel shrank) · 3 stopped by `--max-cost` (partial saved) |
+| `CONSENSUS_VERSION` / `CONSENSUS_SHA256` | Install a tagged release, optionally verifying the tarball checksum. |
+
+Cost lines separate what API keys will bill from what subscription seats consumed as quota (shown as a list-price equivalent), and name any seat that reported no usage.
+
+## Hosts the installer wires up
+
+Claude Code, Codex CLI, Gemini CLI, Grok CLI, Cursor, Windsurf, Claude Desktop, VS Code (Copilot agent mode, user-level `mcp.json`), Zed (`context_servers`), and the cross-tool `~/.agents/skills` directory read by Copilot and others. `consensus doctor` shows, per host, whether the MCP server is registered and the skill installed; `consensus uninstall` reverses all of it.

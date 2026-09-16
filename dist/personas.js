@@ -89,6 +89,10 @@ export function resolvePersona(ref, library = {}, name) {
     return resolveOne(ref, library, name);
 }
 function resolveOne(ref, library, name) {
+    // "skeptic-2" (a second seat with the same persona) resolves to "skeptic" but keeps its own name.
+    const m = ref.match(/^([a-z0-9][a-z0-9-]*?)-(\d+)$/);
+    if (m && !library[ref] && !PERSONAS[ref] && (library[m[1]] || PERSONAS[m[1]]))
+        return { ...resolveOne(m[1], library), name: name ?? ref };
     const fromLib = library[ref];
     if (fromLib)
         return typeof fromLib === "string" ? { name: name ?? ref, description: "custom", prompt: fromLib } : { ...fromLib, name: name ?? fromLib.name };

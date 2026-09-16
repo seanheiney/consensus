@@ -113,6 +113,36 @@ export function createMcpServer() {
             .join("\n\n");
         return { content: [{ type: "text", text: summary }] };
     });
+    server.registerTool("consensus_design", {
+        title: "Design a panel from a brief",
+        description: "Turn a plain-English brief (how many panelists, what expertise, frontier or commodity models, rounds) into a saved profile with personas, seated across the user's connected vendors. Returns the profile name to pass to `consensus`.",
+        inputSchema: {
+            brief: z.string().describe("e.g. '5 panelists: a security expert, a distributed-systems engineer, a PM, a skeptic; frontier models; 3 rounds'"),
+            name: z.string().optional().describe("Profile name; default chosen by the designer."),
+        },
+    }, async ({ brief, name }) => {
+        const { askDesigner, materializeDesign, TIER_WORDS } = await import("./designer.js");
+        const { autoDetectSpecs, loadUserConfig, saveUserConfig } = await import("./config.js");
+        const { createPanelist } = await import("./providers/index.js");
+        const statuses = await scanVendors(credentialEnv());
+        const specs = await autoDetectSpecs(credentialEnv());
+        if (!specs.length)
+            return { content: [{ type: "text", text: "No connected model to design with; run `consensus setup`." }] };
+        let tier;
+        for (const [w, t] of Object.entries(TIER_WORDS))
+            if (!tier && new RegExp(`\\b${w}\\b`, "i").test(brief))
+                tier = t;
+        const design = await askDesigner(createPanelist(specs[0], { effort: "medium", env: credentialEnv() }), brief, statuses, tier);
+        const built = materializeDesign(design, statuses);
+        if (built.profile.panel.length < 2)
+            return { content: [{ type: "text", text: `Could not seat the panel: ${built.unseated.join("; ")}` }] };
+        const cfg = await loadUserConfig();
+        const profileName = name ?? built.name;
+        cfg.personas = { ...cfg.personas, ...built.personas };
+        cfg.profiles = { ...cfg.profiles, [profileName]: built.profile };
+        await saveUserConfig(cfg);
+        return { content: [{ type: "text", text: `Saved profile "${profileName}" (${design.description}).\nSeats:\n${built.seatsExplained.map((s) => `- ${s}`).join("\n")}\nJudge: ${built.profile.judge}; rounds: ${built.profile.rounds}.${built.unseated.length ? `\nNot seated: ${built.unseated.join("; ")}` : ""}\n${design.rationale}\nUse it: call consensus with profile="${profileName}".` }] };
+    });
     server.registerTool("consensus_profiles", {
         title: "List consensus profiles and connections",
         description: "List the user's model profiles (which models sit on the panel for each) and which vendors are connected. Cheap; call before a long consensus run.",

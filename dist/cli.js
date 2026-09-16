@@ -424,6 +424,106 @@ profile
     log(`deleted ${name}${cfg.profile ? ` (active: ${cfg.profile})` : ""}`);
 });
 profile
+    .command("design")
+    .argument("[brief]", "plain-English description: how many panelists, what expertise, frontier or commodity models, how many rounds")
+    .description("build a profile from a plain-English brief (or answer a few questions); your strongest connected model drafts the personas")
+    .option("--name <name>", "profile name (default: chosen by the designer)")
+    .option("--tier <tier>", "frontier | balanced | commodity (overrides the brief)")
+    .option("--no-llm", "template personas instead of a model call")
+    .option("-y, --yes", "save without confirming")
+    .action(async (brief, o) => {
+    const { TIER_WORDS, askDesigner, materializeDesign, templateDesign } = await import("./designer.js");
+    const cfg = await loadUserConfig();
+    const statuses = await scanVendors(credentialEnv());
+    let tier = o.tier ? TIER_WORDS[o.tier.toLowerCase()] : undefined;
+    if (o.tier && !tier)
+        throw new Error(`--tier must be frontier, balanced or commodity`);
+    let count = 0;
+    let expertise = [];
+    let rounds = 3;
+    if (!brief) {
+        if (!process.stdin.isTTY)
+            throw new Error("Give a brief as the argument, e.g. consensus profile design \"5 panelists: security, distributed systems, PM; frontier models\"");
+        p.intro("design a panel");
+        const n = await p.select({ message: "How many panelists?", options: [2, 3, 4, 5, 6, 7].map((k) => ({ value: k, label: String(k), hint: k === 3 ? "typical" : k >= 6 ? "slow and expensive" : undefined })), initialValue: 3 });
+        if (p.isCancel(n))
+            return;
+        count = Number(n);
+        const ex = await p.text({ message: "What expertise should they have? (comma-separated, e.g. security, distributed systems, product)", placeholder: "security, performance, product", validate: (v) => (!v?.trim() ? "Required" : undefined) });
+        if (p.isCancel(ex))
+            return;
+        expertise = String(ex).split(",").map((x) => x.trim()).filter(Boolean);
+        const t = await p.select({ message: "Which models?", options: [{ value: "frontier", label: "frontier", hint: "best model per vendor, max effort" }, { value: "standard", label: "balanced", hint: "strong mid-tier" }, { value: "budget", label: "commodity", hint: "cheapest capable" }], initialValue: tier ?? "standard" });
+        if (p.isCancel(t))
+            return;
+        tier = t;
+        const r = await p.select({ message: "Debate rounds", options: [1, 2, 3, 5].map((k) => ({ value: k, label: String(k) })), initialValue: 3 });
+        if (p.isCancel(r))
+            return;
+        rounds = Number(r);
+        brief = `${count} panelists with this expertise: ${expertise.join(", ")}. Use ${t === "frontier" ? "frontier" : t === "budget" ? "commodity (cheap)" : "balanced mid-tier"} models. ${rounds} round(s) of debate.`;
+    }
+    else {
+        const m = brief.match(/(\d+)\s*(panel|seat|member|expert|model)/i);
+        if (m)
+            count = Number(m[1]);
+        for (const [w, t] of Object.entries(TIER_WORDS))
+            if (!tier && new RegExp(`\\b${w}\\b`, "i").test(brief))
+                tier = t;
+        const rm = brief.match(/(\d+)\s*rounds?/i);
+        if (rm)
+            rounds = Math.min(5, Math.max(1, Number(rm[1])));
+    }
+    let design;
+    if (o.llm === false) {
+        if (!expertise.length)
+            expertise = brief.split(/[,;:]| and /i).map((x) => x.trim()).filter((x) => x && !/panelist|round|model|frontier|commodity|budget|cheap/i.test(x));
+        design = templateDesign(brief, count || Math.max(2, expertise.length), expertise, tier ?? "standard", rounds);
+    }
+    else {
+        const { autoDetectSpecs } = await import("./config.js");
+        const specs = await autoDetectSpecs(credentialEnv());
+        if (!specs.length)
+            throw new Error("No connected model to draft the panel with; run `consensus setup` or use --no-llm.");
+        const designer = createPanelist(specs[0], { effort: "medium", env: credentialEnv() });
+        log(dim(`asking ${designer.id} to design the panel…`));
+        design = await askDesigner(designer, brief, statuses, tier);
+        if (count)
+            design.seats = design.seats.slice(0, Math.max(2, count));
+        if (tier)
+            for (const s of design.seats)
+                s.tier = tier;
+    }
+    const built = materializeDesign(design, statuses);
+    const name = o.name ?? built.name;
+    log(bold(`\n${name}`) + (design.description ? `  — ${design.description}` : ""));
+    for (const s of built.seatsExplained)
+        log(`  ${s}`);
+    log(dim(`  judge ${built.profile.judge}, rounds ${built.profile.rounds}`));
+    if (Object.keys(built.personas).length) {
+        log(bold("\nnew personas"));
+        for (const [n, t] of Object.entries(built.personas))
+            log(`  ${n}: ${dim(t)}`);
+    }
+    if (built.unseated.length)
+        log(yellow(`\nnot seated: ${built.unseated.join("; ")}`));
+    if (design.rationale)
+        log(dim(`\n${design.rationale}`));
+    if (built.profile.panel.length < 2)
+        throw new Error("Fewer than 2 seats could be filled with your connections; run `consensus setup` to connect more vendors or add an OpenRouter key.");
+    if (!o.yes) {
+        if (!process.stdin.isTTY)
+            throw new Error("Pass --yes to save without confirmation.");
+        const ok = await p.confirm({ message: `Save profile "${name}"?`, initialValue: true });
+        if (p.isCancel(ok) || !ok)
+            return log("not saved");
+    }
+    cfg.personas = { ...cfg.personas, ...built.personas };
+    cfg.profiles = { ...cfg.profiles, [name]: built.profile };
+    await saveUserConfig(cfg);
+    log(`${green(G.ok)} saved profile ${name}. Try: consensus "…" --profile ${name}`);
+});
+profile
     .command("refresh")
     .description("re-materialize preset-derived profiles against your current connections (e.g. after a CLI upgrade or a new key)")
     .action(async () => {
