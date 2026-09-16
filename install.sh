@@ -372,10 +372,15 @@ fetch() {
     curl)
       if [ -n "$f_progress" ] && [ -t 2 ]; then f_flags="--progress-bar"; else f_flags="-sS"; fi
       case "$f_url" in https://*) f_proto="--proto =https --tlsv1.2" ;; *) f_proto="" ;; esac
-      f_errf="$f_out.err"
-      if [ -n "$f_progress" ]; then f_errf=/dev/stderr; fi
-      # shellcheck disable=SC2086
-      f_code=$(curl -fL $f_flags $f_proto --retry 3 --retry-delay 1 --connect-timeout 20 -w '%{http_code}' -o "$f_out" "$f_url" 2>"$f_errf") && { rm -f "$f_out.err"; return 0; }
+      # The progress bar goes straight to our stderr. (Never `2>/dev/stderr`: on Linux that
+      # re-opens a redirected log file with O_TRUNC and wipes everything printed so far.)
+      if [ -n "$f_progress" ]; then
+        # shellcheck disable=SC2086
+        f_code=$(curl -fL $f_flags $f_proto --retry 3 --retry-delay 1 --connect-timeout 20 -w '%{http_code}' -o "$f_out" "$f_url") && return 0
+      else
+        # shellcheck disable=SC2086
+        f_code=$(curl -fL $f_flags $f_proto --retry 3 --retry-delay 1 --connect-timeout 20 -w '%{http_code}' -o "$f_out" "$f_url" 2>"$f_out.err") && { rm -f "$f_out.err"; return 0; }
+      fi
       rm -f "$f_out"
       [ "$f_code" = "404" ] && { rm -f "$f_out.err"; return 44; }
       [ -f "$f_out.err" ] && { cat "$f_out.err" >&2; rm -f "$f_out.err"; }
