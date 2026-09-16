@@ -239,7 +239,7 @@ program
     for (const h of listHosts()) {
       const i = h.installed?.() ?? {};
       const parts = [h.installMcp ? `MCP ${i.mcp ? "registered" : "not registered"}` : undefined, h.installSkill ? `skill ${i.skill ? "installed" : "missing"}` : undefined].filter(Boolean).join(", ");
-      log(`  ${h.detected ? "✓" : "○"} ${h.name.padEnd(28)} ${h.detected ? dim(parts) : dim("not detected")}`);
+      log(`  ${h.detected ? G.ok : G.no} ${h.name.padEnd(28)} ${h.detected ? dim(parts) : dim("not detected")}`);
     }
     log(dim(`  MCP launch command: ${mcpLaunchCommand().join(" ")}`));
     if (o.probe) {
@@ -589,7 +589,7 @@ program
     log(bold("OpenRouter") + "  " + (or.connected ? green("connected (OPENROUTER_API_KEY)") : dim("not connected; any openrouter:<vendor>/<model> id works once a key is set")));
     log(bold("\nOther providers"));
     for (const n of ["ollama"]) log(`  ${n.padEnd(10)}:${PROVIDERS[n]!.defaultModel}  ${dim(PROVIDERS[n]!.description)}`);
-    log(dim("\nSpec format: provider[:model][#effort]   e.g. claude:claude-opus-5#high, compat:<model>@<baseURL>"));
+    log(dim("\nSpec format: provider[:model][#effort][+persona[+persona]]   e.g. claude:claude-opus-5#high+skeptic, compat:<model>@<baseURL>"));
   });
 
 program

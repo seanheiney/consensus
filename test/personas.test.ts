@@ -54,3 +54,12 @@ describe("personas", () => {
     expect(judge.id).toBe("anthropic:claude-fable-5-1+pragmatist");
   });
 });
+
+describe("stacked personas from --panel", () => {
+  it("spec+a+b becomes a stacked persona and a stable id", () => {
+    const env = { ANTHROPIC_API_KEY: "k", PATH: "/nonexistent" };
+    expect(splitMember("claude+skeptic+teacher")).toEqual({ spec: "claude", persona: "skeptic,teacher" });
+    const { panel } = buildPanel(["anthropic+skeptic+teacher", "anthropic+economist"], "high", undefined, env);
+    expect(panel.map((p) => p.id)).toEqual(["anthropic:claude-fable-5-1+skeptic", "anthropic:claude-fable-5-1+economist"]);
+  });
+});

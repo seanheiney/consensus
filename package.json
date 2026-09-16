@@ -18,10 +18,12 @@
   "files": [
     "dist",
     "packs",
+    "docs/*.md",
     "README.md",
     "PACKS.md",
     "LICENSE",
-    "install.sh"
+    "install.sh",
+    "install.ps1"
   ],
   "engines": {
     "node": ">=22"

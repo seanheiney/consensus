@@ -168,7 +168,8 @@ export function splitMember(member: Member): { spec: string; persona?: string; n
   if (typeof member !== "string") return { spec: member.model, persona: member.persona, name: member.name };
   const plus = member.indexOf("+");
   if (plus === -1) return { spec: member };
-  return { spec: member.slice(0, plus), persona: member.slice(plus + 1) };
+  // `spec+a+b` stacks personas (same as "a,b" inside a profile), so --panel can express it despite splitting on commas.
+  return { spec: member.slice(0, plus), persona: member.slice(plus + 1).replace(/\+/g, ",") };
 }
 
 /** Stable id for a member, e.g. "claude:claude-opus-5+skeptic". */
