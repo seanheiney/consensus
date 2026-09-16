@@ -177,3 +177,51 @@ Owner's ask after re-run 1. Reviewer asks were mapped dimension by dimension and
 **Still needs the owner:** `npm publish` (not logged in on this machine); a positioning decision on subscription seats; a `GEMINI_API_KEY` and `grok login` to make those vendors live. **Still open (research/larger):** thinking summaries for CLI seats (Claude Code's JSON envelope omits thinking), the ablation study over the starter suite using the new `--baseline` arms, and an MCP task-mode implementation (`taskSupport`).
 
 **Projection, not a measurement:** the reviewers' own justifications tie task-success almost entirely to the install path (now real) and trust to cost honesty, ceilings, retries, and judge neutrality (now built). A fresh panel should move task-success back above run 1 and trust above 3. A 5.0 on every line from expert reviewers would require the ablation evidence (researcher), an npm release plus a first-run success rate (PM/staff engineer), and a term-compliant positioning for subscription seats (Anthropic engineer). The next re-run is JTBD 1 against the public install path plus a fresh panel.
+
+---
+
+# Re-run 2 — 2026-09-16, public install path, fresh panel
+
+Scope: Layer 0 re-run against the public repo; JTBD 1 re-driven against the README's actual one-liner from a fresh HOME (PASS: 7.8 s from `curl` to a configured install, every follow-up command as documented, `uninstall` clean); JTBD 2–5 supplied as prior passes with a changes-since header plus a live run with the current binary; a fresh 5-reviewer panel (new agents, same five archetypes, no access to prior reports).
+
+## 1. Rubric scoreboard (same five archetypes; run 1 → run 2 → run 3)
+
+| Reviewer | task-success | clarity | trust | delight | accessibility |
+|---|---:|---:|---:|---:|---:|
+| R1 Solo AI power user | 4 → 3 → 4 | 3 → 4 → 3 | 2 → 3 → 3 | 4 → 4 → 4 | 4 → 4 → 4 |
+| R2 Staff engineer for a team | 4 → 3 → 4 | 3 → 3 → 4 | 2 → 3 → 3 | 4 → 4 → 4 | 3 → 3 → 4 |
+| R3 Anthropic platform engineer | 4 → 3 → 4 | 4 → 4 → 4 | 3 → 3 → 3 | 4 → 4 → 4 | 3 → 3 → 4 |
+| R4 OpenAI platform engineer | 3 → 4 → 3 | 3 → 3 → 3 | 2 → 2 → 3 | 4 → 4 → 3 | 3 → 3 → 4 |
+| R6 Skeptical researcher / maintainer | 3 → 3 → 4 | 3 → 4 → 4 | 2 → 3 → 3 | 4 → 4 → 4 | 4 → 4 → 4 |
+| **Mean** | **3.6 → 3.2 → 3.8** | **3.2 → 3.6 → 3.6** | **2.2 → 2.8 → 3.0** | **4.0 → 4.0 → 3.8** | **3.4 → 3.4 → 4.0** |
+
+Delta vs run 2: task-success +0.6 (the install path is real), trust +0.2, accessibility +0.6, clarity flat, delight −0.2 (R4 docked the Codex leg for not using `--json`/`--output-schema`; `--json` is now used). No P0 from four of five reviewers; the two P0s filed (researcher: baseline arm carried the panel prompt; OpenAI engineer: presets advertised Astra while seating Sol) were both fixed the same hour.
+
+## 2. Confirmed findings from run 3 and their status
+
+- **[P0→fixed] Single-model baseline arm was given the panel system prompt**, confounding the one measurement that could test the product's claim. Now a plain expert prompt with no panel framing.
+- **[P0→fixed] Presets, `doctor`, and `models` advertised `gpt-6-astra` while seating `gpt-5.6-sol`.** The substitution reason is now computed, stored on the profile, and printed by `profile presets`, `profiles`, and `models` ("cannot run here: codex 0.148.0 < 0.154.0 …").
+- **[P1→fixed] `--quiet` discarded the dropped-seat exit code.** Exit code 2 is set regardless of quiet.
+- **[P1→fixed] Cost accounting treated subscription seats as billable.** Cost is now split: billed to API keys (the only number `--max-cost` enforces) vs subscription seats' list-price equivalent ("quota, not a bill") vs seats with no usage; `run.json` omits usage for seats that reported none instead of writing `0/0`.
+- **[P1→fixed] Codex seats had no token accounting.** `codex exec --json` is used; `turn.completed` supplies input, cached, output and reasoning tokens. `unified_exec` added to the disabled tools.
+- **[P1→fixed] `debate.md` header printed the run-level effort.** It now lists every seat with its own effort and persona.
+- **[P1→fixed] Judge is a panelist by default with no warning.** The report now states whether the judge debated and how to seat an external one; `external:<spec>` already existed.
+- **[P1→fixed] A shell-exported vendor key silently moved a subscription seat to API billing.** The run header now says so per seat.
+- **[P1→fixed] `.consensus/` only gitignored when `.git` was in the cwd.** Now any enclosing repo.
+- **[P1→fixed] No pinnable version.** `CONSENSUS_VERSION=v0.1.0` installs a tagged tarball.
+- **[P2→fixed]** `uninstall --yes` accepted; `*em*` rendered in the HTML page; "converged" and "confidence" defined in every report footer.
+- **[P1, open, needs the owner]** No evidence that the panel beats one model: run the ablation (`consensus bench -P frontier,balanced --baseline claude:claude-opus-5,codex:gpt-5.6-sol --trials 3` over the starter suite) and publish the table. **[P1, open]** README did not yet document `--max-cost`, `--html`, `--force`, `uninstall`, `persona add`, exit codes, `NO_COLOR`/`CONSENSUS_ASCII`: addressed by the documentation rewrite in progress (docs/install.md, docs/faq.md, docs/usage.md). **[P2, open]** Anthropic and Codex paths do not use structured outputs (`req.json` ignored; `--output-schema` unused); no prompt caching on the Anthropic route; grader reads the reference before scoring quality; `-p` vs `-P` differ only by case.
+
+## 3. Layer 1 task table
+
+| JTBD | Run 1 | Run 2 | Run 3 |
+|---|---|---|---|
+| 1 Install and set up from zero | PARTIAL | PARTIAL | **PASS** (public one-liner, 7.8 s) |
+| 2 Ask, watch, read the debate | PASS | prior | prior + fresh live run |
+| 3 Profiles, personas, packs | PARTIAL | PASS | prior |
+| 4 Use from an agent via MCP | PASS | prior | prior |
+| 5 Benchmark and library | PARTIAL | PASS | prior |
+
+## 4. Next re-run
+
+After the docs rewrite lands and the ablation table exists: fresh panel, all five JTBDs re-driven. Expected: clarity ≥ 4 (docs), trust ≥ 3.5 (evidence + cost split), and the researcher's remaining P1 closed by the ablation.
