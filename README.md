@@ -45,6 +45,13 @@ consensus log --html    # one self-contained page you can send to someone
 
 Not connected to anything yet? `consensus doctor` says what is missing and how to fix it. You need **at least two seats** for a panel; one OpenRouter key (`OPENROUTER_API_KEY`) is enough to reach every vendor at once.
 
+Want a panel shaped for your problem? Describe it and a model drafts the seats and personas:
+
+```bash
+consensus profile design "4 panelists: security, distributed systems, a PM, a skeptic; frontier models; 2 rounds"
+consensus "…" --profile <the name it chose>
+```
+
 ## Install
 
 | Platform | Command |
