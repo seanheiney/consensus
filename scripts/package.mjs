@@ -169,7 +169,13 @@ async function packageTarget(platform, arch) {
   if (platform === "win") {
     archive = join(outDir, `consensus-${target}.zip`);
     rmSync(archive, { force: true });
-    execFileSync("zip", ["-q", "-r", "-X", archive, "consensus"], { cwd: stage, stdio: "inherit", env });
+    try {
+      execFileSync("zip", ["-q", "-r", "-X", archive, "consensus"], { cwd: stage, stdio: "inherit", env });
+    } catch (err) {
+      if (process.platform !== "win32") throw err;
+      // Windows runners have no `zip`; Compress-Archive keeps the top-level consensus\ directory.
+      execFileSync("powershell", ["-NoProfile", "-Command", `Compress-Archive -Path consensus -DestinationPath '${archive}' -Force`], { cwd: stage, stdio: "inherit" });
+    }
   } else {
     archive = join(outDir, `consensus-${target}.tar.gz`);
     rmSync(archive, { force: true });

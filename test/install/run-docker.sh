@@ -20,10 +20,12 @@
 #                         install of the repo tarball, which needs internet access
 #
 # Env: KEEP=1 keeps containers for debugging. SKIP_FALLBACK=1 skips the network-heavy npm fallback.
+# Commands are single-quoted on purpose: they expand inside the containers (SC2016).
+# shellcheck disable=SC2015,SC2016
 set -eu
 
-here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
-repo=$(CDPATH= cd -- "$here/../.." && pwd -P)
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+repo=$(CDPATH='' cd -- "$here/../.." && pwd -P)
 REL="${RELEASE_DIR:-$repo/dist-release}"
 NET="consensus-install-test-$$"
 SRV="relsrv"
