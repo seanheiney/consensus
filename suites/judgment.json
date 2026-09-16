@@ -1,0 +1,53 @@
+{
+  "name": "judgment",
+  "cases": [
+    {
+      "id": "idempotent-payments",
+      "tags": ["design", "judgment"],
+      "prompt": "A payments API lets clients retry POST /charges after timeouts. Design idempotency so a retried request never double-charges, across two API replicas and a Postgres primary. Decide the key scheme, storage, TTL, and what to return when a retry arrives while the original is still in flight.",
+      "rubric": "Client-supplied idempotency key scoped per account; key stored with request hash and response, unique constraint enforced by the database (not application memory) so two replicas cannot both proceed; a mismatched body under the same key is rejected (409/422); in-flight concurrent retry returns 409 or waits, never starts a second charge; TTL of at least 24h with the tradeoff stated; the charge and the key record are committed in one transaction or the key claim happens first; mentions the processor's own idempotency as defense in depth."
+    },
+    {
+      "id": "feature-flags-migration",
+      "tags": ["design", "judgment"],
+      "prompt": "We must migrate a 50-table monolith's `users` table from an integer primary key to UUIDv7 with zero downtime and rollback for a week. Plan it. Decide whether to dual-write, backfill order, how foreign keys move, and what the rollback actually is.",
+      "rubric": "Expand-migrate-contract sequence: add nullable uuid column, backfill in batches, dual-write via triggers or application code, add unique index concurrently, switch reads behind a flag, then switch foreign keys table by table; rollback is flipping reads back while dual-write continues, not dropping columns; names lock risks (ALTER on large tables, index build) and mitigations (CONCURRENTLY, batch sizes); UUIDv7 chosen for index locality; contract phase deferred a week; states the irreversible step explicitly."
+    },
+    {
+      "id": "cache-invalidation",
+      "tags": ["design", "judgment"],
+      "prompt": "A product catalog API (10k RPS reads, 5 writes/s, strong preference for fresh prices) sits behind a CDN and a Redis cache. Prices must not be stale more than 2 seconds after an update. Decide the caching strategy and invalidation mechanism, and say what you would NOT do.",
+      "rubric": "Short TTL alone cannot guarantee a 2 s bound under CDN; recommends event-driven invalidation (purge/tag purge at the CDN plus Redis delete or versioned keys) triggered transactionally after commit (outbox), with a short TTL as backstop; separates price from the rest of the product document (split keys or stale-while-revalidate for non-price fields); warns against cache-aside with long TTL, against invalidating before commit, and against relying on write-through into CDN; mentions thundering herd protection (request coalescing / lock)."
+    },
+    {
+      "id": "oncall-alerting",
+      "tags": ["ops", "judgment"],
+      "prompt": "Our on-call was paged 40 times last week, 3 were real incidents. Redesign the alerting for a web service with a 99.9% availability SLO so that pages are rare and actionable, without missing real outages. Be specific about what pages, what only opens a ticket, and how thresholds are set.",
+      "rubric": "Pages on symptoms tied to the SLO (error-budget burn rate with two windows, e.g. fast and slow burn), not on causes (CPU, single host); severity tiers: page vs ticket vs dashboard; dead-man/heartbeat alerts stay immediate; per-tick re-paging replaced by edge-triggered state with re-escalation and recovery notification; thresholds derived from the SLO and historical data, reviewed in a weekly noise review; explicitly demotes the low-signal alerts; mentions runbooks on every page."
+    },
+    {
+      "id": "auth-tokens",
+      "tags": ["security", "judgment"],
+      "prompt": "A SPA plus mobile app talk to our API. Decide the session/token design: JWT vs opaque, where tokens live in the browser, refresh strategy, revocation on password change, and how logout works across devices. Justify each choice against XSS and CSRF.",
+      "rubric": "Short-lived access token (opaque or JWT) plus rotating refresh token with reuse detection; browser: httpOnly Secure SameSite cookie for the refresh token (or BFF pattern), access token in memory, not localStorage; CSRF mitigated by SameSite plus a CSRF token or custom header for cookie-authenticated calls; revocation requires server-side state (refresh-token family / session table) even with JWTs; password change and global logout invalidate all sessions via that state; mobile stores refresh token in the secure keystore; names JWT revocation as the reason not to rely on stateless JWTs alone."
+    },
+    {
+      "id": "queue-choice",
+      "tags": ["architecture", "judgment"],
+      "prompt": "A team of six runs a Rails app on Postgres and needs background jobs: emails, PDF generation (minutes), and a nightly report. Decide between a Postgres-backed queue and Redis/Sidekiq, and set the criteria that would make you switch later.",
+      "rubric": "Recommends the Postgres-backed queue (e.g. Solid Queue / GoodJob) for this scale with reasons: one datastore, transactional enqueue, simpler ops; identifies the switch triggers: sustained high throughput, queue table bloat/vacuum pressure, need for sub-second latency or Redis-specific features; addresses long-running PDF jobs (timeouts, separate queue, idempotent retries) and the nightly report (scheduling, single-run locking); warns about polling costs and advisory locks; states the migration path."
+    },
+    {
+      "id": "rate-limiting",
+      "tags": ["design", "judgment"],
+      "prompt": "Design rate limiting for a multi-tenant public API with free and paid tiers, 20 API nodes, and bursts. Choose the algorithm, where state lives, how limits are keyed, what headers and errors clients see, and how to avoid punishing everyone when Redis is degraded.",
+      "rubric": "Token bucket or sliding window (not fixed window) keyed by tenant and by API key, with tier-specific limits and burst capacity; centralized counters in Redis with atomic Lua or local approximation with periodic sync; returns 429 with Retry-After and RateLimit headers; degraded Redis fails open with a conservative local limit rather than blocking all traffic, with alerting; separates per-endpoint expensive operations; mentions clock/skew and the cost of exactness."
+    },
+    {
+      "id": "search-index",
+      "tags": ["architecture", "judgment"],
+      "prompt": "A SaaS with 2M documents needs full-text search with filters and near-real-time updates (under 5 s). Decide between Postgres full-text search and a dedicated engine (Elasticsearch/OpenSearch/Meilisearch/Typesense), and describe the indexing pipeline for the choice you make.",
+      "rubric": "Chooses based on stated needs: at 2M docs with filters and NRT either can work; a defensible answer picks Postgres FTS if relevance needs are modest and ops must stay minimal, or a dedicated engine if ranking, typo tolerance, facets, or relevance tuning matter, and says which assumption drives it; indexing pipeline: CDC/outbox from the primary, idempotent upserts, versioning to avoid out-of-order updates, backfill strategy, and a lag metric with an alert at the 5 s bound; names the consistency gap and how the UI handles it."
+    }
+  ]
+}

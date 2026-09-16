@@ -26,7 +26,7 @@ function supportsAdaptive(model) {
     return !/^claude-(haiku-4-5|sonnet-4-5|opus-4-5|opus-4-1|sonnet-4-1|3-|.*-3-)/.test(model);
 }
 export function createAnthropicPanelist(opts) {
-    const client = new Anthropic(opts.apiKey ? { apiKey: opts.apiKey } : {});
+    const client = opts.client ?? new Anthropic({ apiKey: opts.apiKey ?? process.env.ANTHROPIC_API_KEY ?? "missing" });
     const model = opts.model;
     return {
         id: `anthropic:${model}`,

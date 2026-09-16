@@ -207,8 +207,38 @@ async function runOne(target, c, o, trial) {
         if (target.single) {
             // A clean baseline: no panel framing at all, just the question.
             const plain = `${c.prompt.trim()}${c.context?.trim() ? `\n\nContext:\n${c.context.trim()}` : ""}`;
-            const res = await target.single.complete({ system: "You are a careful expert. Answer the question completely and give your reasoning.", messages: [{ role: "user", content: plain }], effort: target.effort, phase: "propose" });
-            const usage = res.usage ?? { inputTokens: 0, outputTokens: 0 };
+            const sys = "You are a careful expert. Answer the question completely and give your reasoning.";
+            const n = Math.max(1, target.samples ?? 1);
+            const acc = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: undefined };
+            const add = (u) => {
+                if (!u)
+                    return;
+                acc.inputTokens += u.inputTokens;
+                acc.outputTokens += u.outputTokens;
+                acc.cacheReadTokens += u.cacheReadTokens ?? 0;
+                if (u.costUsd !== undefined)
+                    acc.costUsd = (acc.costUsd ?? 0) + u.costUsd;
+            };
+            let res;
+            if (n === 1) {
+                res = await target.single.complete({ system: sys, messages: [{ role: "user", content: plain }], effort: target.effort, phase: "propose" });
+                add(res.usage);
+            }
+            else {
+                // Self-consistency control: N independent samples, then the same model chooses/merges the best.
+                const samples = await Promise.all(Array.from({ length: n }, () => target.single.complete({ system: sys, messages: [{ role: "user", content: plain }], effort: target.effort, phase: "propose" })));
+                for (const s of samples)
+                    add(s.usage);
+                const merged = await target.single.complete({
+                    system: sys,
+                    messages: [{ role: "user", content: `${plain}\n\nBelow are ${n} independent answers you produced to this question. Where they agree, keep it; where they disagree, decide which is right and why; produce the single best final answer, complete and usable on its own.\n\n${samples.map((s, i) => `### Answer ${i + 1}\n\n${s.text.trim()}`).join("\n\n---\n\n")}` }],
+                    effort: target.effort,
+                    phase: "synthesize",
+                });
+                add(merged.usage);
+                res = merged;
+            }
+            const usage = { inputTokens: acc.inputTokens, outputTokens: acc.outputTokens, cacheReadTokens: acc.cacheReadTokens, ...(acc.costUsd !== undefined ? { costUsd: acc.costUsd } : {}) };
             const cost = estimateCost({ [target.single.id]: usage });
             return { ...base, ok: true, ms: Date.now() - t0, converged: false, rounds: 0, usage, costUsd: cost.usd, subscriptionUsd: cost.subscriptionEquivUsd, unpriced: cost.unpriced, dropped: [], answer: res.text };
         }
@@ -343,19 +373,19 @@ export function renderBench(r) {
         "",
         `_${r.results.length} runs across ${r.summaries.length} arm${r.summaries.length === 1 ? "" : "s"}, graded blind by ${r.grader}${r.seed !== undefined ? ` (grader shuffle seed ${r.seed})` : ""}. Quality is scored before the grader sees any reference or rubric; accuracy is scored against the reference (or the rubric for judgment cases). Cost is the equivalent API list price; subscription seats do not bill per token, and a seat that reports no usage is excluded and listed below, not counted as $0. Started ${r.startedAt}._`,
         ...(r.graderOverlap?.length ? ["", `**Grader bias warning:** the grader shares a model vendor with: ${r.graderOverlap.join(", ")}. LLM judges favour their own family; re-run with a grader from another vendor before trusting gaps involving these arms.`] : []),
-        ...(r.summaries.some((s) => s.profile.startsWith("single:")) ? ["", "_Arms named `single:<model>` are baselines: one model answering once with no debate._"] : []),
+        ...(r.summaries.some((s) => s.profile.startsWith("single:")) ? ["", "_Arms named `single:<model>` are baselines: one model answering once with no debate. Arms named `selfx<N>:<model>` are self-consistency controls: the same model answers N times and then picks or merges its own best answer (more tokens, no debate)._"] : []),
         "",
         "| Arm | n | Accuracy (±sd) | Quality (±sd) | Converged | Avg time | Tokens in / out | Billed (API) | Subscription equiv. | Failures |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ];
     for (const s of r.summaries) {
-        const conv = s.profile.startsWith("single:") ? "n/a" : `${Math.round(s.convergedRate * 100)}%`;
+        const conv = s.profile.startsWith("single:") || s.profile.startsWith("selfx") ? "n/a" : `${Math.round(s.convergedRate * 100)}%`;
         const pm = (v) => (v === null ? "" : ` ±${v.toFixed(1)}`);
         lines.push(`| ${s.profile} | ${s.cases - s.failures} | ${f1(s.avgAccuracy)}${pm(s.accuracySd)} | ${f1(s.avgQuality)}${pm(s.qualitySd)} | ${conv} | ${(s.avgMs / 1000).toFixed(0)}s | ${s.totalIn.toLocaleString("en-US")} / ${s.totalOut.toLocaleString("en-US")} | ${usd(s.totalCostUsd)} | ${usd(s.totalSubscriptionUsd)} | ${s.failures} |`);
     }
     // Head-to-head: how often each panel arm beat each baseline on the same case+trial.
-    const singles = r.summaries.map((s) => s.profile).filter((n) => n.startsWith("single:"));
-    const panels = r.summaries.map((s) => s.profile).filter((n) => !n.startsWith("single:"));
+    const singles = r.summaries.map((s) => s.profile).filter((n) => n.startsWith("single:") || n.startsWith("selfx"));
+    const panels = r.summaries.map((s) => s.profile).filter((n) => !n.startsWith("single:") && !n.startsWith("selfx"));
     if (singles.length && panels.length) {
         lines.push("", "## Head-to-head (panel vs single model, same case and trial)", "", "| Panel | Baseline | Wins / ties / losses on quality | Wins / ties / losses on accuracy |", "|---|---|---:|---:|");
         for (const pnl of panels)

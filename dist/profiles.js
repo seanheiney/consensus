@@ -1,6 +1,6 @@
 /** Interactive model selector for building / editing profiles. */
 import * as p from "@clack/prompts";
-import { CATALOG, CATALOG_VENDORS, PRESETS, pickSeatable, priceLabel, routeFor, specFor } from "./catalog.js";
+import { CATALOG, CATALOG_VENDORS, PRESETS, directRouteBlocker, pickSeatable, priceLabel, routeFor, specFor } from "./catalog.js";
 import { splitMember } from "./config.js";
 import { PERSONAS } from "./personas.js";
 import { VENDORS, formatSpec, parseSpec, specId } from "./providers/index.js";
@@ -65,6 +65,8 @@ export function materializePreset(preset, statuses) {
             const spec = specFor(preset.vendor, m, statuses, preset.effort);
             if (spec)
                 panel.push(spec);
+            else if (statuses.some((s) => s.vendor === preset.vendor && s.connected))
+                substitutions.push(`${m.id} left out: ${directRouteBlocker(preset.vendor, m, statuses) ?? "not seatable"}`);
         }
     }
     if (panel.length < 2)
@@ -222,7 +224,8 @@ export async function editProfile(statuses, existing, name) {
     const captain = await p.select({
         message: "Captain (moderates, referees, and writes the report)",
         options: [
-            { value: "auto", label: "auto", hint: "best available model, preferring one not on the panel" },
+            { value: "auto", label: "auto", hint: "best available model (separate thread, even if a seat uses it)" },
+            { value: "neutral", label: "neutral", hint: "best model of a vendor not on the panel" },
             ...members.map((m) => ({ value: m.replace(/#\w+(?=\+|$)/, ""), label: `seat: ${m}` })),
             { value: "none", label: "none", hint: "no moderation; the first seat writes the synthesis" },
         ],

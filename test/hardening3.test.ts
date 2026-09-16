@@ -50,6 +50,12 @@ describe("seeded shuffles", () => {
 });
 
 describe("judges", () => {
+  it("captain auto is the best available model even if a seat uses it; neutral avoids panel vendors", async () => {
+    const { autoCaptain } = await import("../src/config.js");
+    const st = [status("anthropic", "claude", "cli"), status("openai", "codex", "cli", "0.160.0"), status("google", undefined), status("xai", undefined), status("openrouter", "openrouter", "api")];
+    expect(await autoCaptain(["claude:claude-fable-5-1", "codex:gpt-6-astra"], st)).toBe("claude:claude-fable-5-1#high");
+    expect(await autoCaptain(["claude:claude-fable-5-1", "codex:gpt-6-astra"], st, "neutral")).toMatch(/^openrouter:google\//);
+  });
   it("external:auto prefers a vendor that is not on the panel", async () => {
     const st = [status("anthropic", "claude", "cli"), status("openai", "codex", "cli", "0.160.0"), status("google", undefined), status("xai", undefined), status("openrouter", "openrouter", "api")];
     const j = await autoExternalJudge(["claude:claude-opus-5", "codex:gpt-5.6-sol"], st);

@@ -191,22 +191,26 @@ export function buildPanel(members, defaultEffort, judgeSpec, env, personaLibrar
     return { panel, judge };
 }
 /**
- * The captain: the best model available, preferring a vendor that is NOT on the
- * panel (neutral), then a different model of a vendor that is, then the strongest
- * seatable model even if a seat uses it (it runs under the captain's own prompt).
+ * The captain: the best model available on this machine (the strongest seatable
+ * frontier model, in catalog order). It may be the same model as a seat; it runs
+ * as a separate thread under the captain's own prompt. Use "neutral" to prefer a
+ * vendor that is not on the panel.
  */
-export async function autoCaptain(members, statuses) {
-    try {
-        return await autoExternalJudge(members, statuses);
-    }
-    catch {
-        for (const vendor of CATALOG_VENDORS) {
-            const pick = pickSeatable(vendor, "frontier", statuses);
-            if (pick)
-                return pick.spec("high");
+export async function autoCaptain(members, statuses, mode = "auto") {
+    if (mode === "neutral") {
+        try {
+            return await autoExternalJudge(members, statuses);
         }
-        throw new Error("No connected model can act as captain; run `consensus setup`.");
+        catch {
+            /* fall through to best available */
+        }
     }
+    for (const vendor of CATALOG_VENDORS) {
+        const pick = pickSeatable(vendor, "frontier", statuses);
+        if (pick)
+            return pick.spec("high");
+    }
+    throw new Error("No connected model can act as captain; run `consensus setup`.");
 }
 /**
  * Pick a judge that did not debate: the strongest seatable model of a vendor
@@ -296,7 +300,7 @@ export async function resolveRun(o) {
         const want = spec ?? "auto";
         if (want === "none")
             return undefined;
-        let concrete = want === "auto" ? await autoCaptain(members, await scan()) : want;
+        let concrete = want === "auto" || want === "neutral" ? await autoCaptain(members, await scan(), want) : want;
         if (concrete.startsWith("any:")) {
             const [m] = resolvePortableMembers([concrete], await scan());
             concrete = typeof m === "string" ? m : m.model;

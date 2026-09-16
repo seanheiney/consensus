@@ -31,6 +31,8 @@ export interface BenchProfileTarget {
     effort: import("./types.js").Effort;
     /** Baseline arm: one model answering once, no debate. `panel`/`judge` are ignored. */
     single?: Panelist;
+    /** Self-consistency arm: `single` answers `samples` times independently, then picks/merges its best answer itself (more tokens, no debate). */
+    samples?: number;
 }
 export interface CaseResult {
     profile: string;

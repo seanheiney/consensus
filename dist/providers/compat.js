@@ -40,23 +40,40 @@ export function createCompatPanelist(opts) {
                             ? { reasoning_effort: effort }
                             : {}
                         : { reasoning_effort: effort };
+            const build = (structured) => ({
+                model,
+                messages: [
+                    { role: "system", content: req.system },
+                    ...req.messages.map((m) => ({ role: m.role, content: m.content })),
+                ],
+                max_completion_tokens: req.maxTokens ?? 32000,
+                ...reasoningParams,
+                ...(req.json
+                    ? structured && req.jsonSchema
+                        ? { response_format: { type: "json_schema", json_schema: { name: "consensus_phase", schema: req.jsonSchema, strict: true } } }
+                        : { response_format: { type: "json_object" } }
+                    : {}),
+            });
             let res;
             try {
-                res = await client.chat.completions.create({
-                    model,
-                    messages: [
-                        { role: "system", content: req.system },
-                        ...req.messages.map((m) => ({ role: m.role, content: m.content })),
-                    ],
-                    max_completion_tokens: req.maxTokens ?? 32000,
-                    ...reasoningParams,
-                    ...(req.json ? { response_format: { type: "json_object" } } : {}),
-                }, { signal: req.signal });
+                res = await client.chat.completions.create(build(true), { signal: req.signal });
             }
             catch (err) {
                 if (isTransient(err))
                     throw new TransientError(err.message, err);
-                throw err;
+                // Gateways that don't take json_schema (or reject this one) fall back to json_object + prompt.
+                if (err instanceof OpenAI.BadRequestError && req.jsonSchema) {
+                    try {
+                        res = await client.chat.completions.create(build(false), { signal: req.signal });
+                    }
+                    catch (err2) {
+                        if (isTransient(err2))
+                            throw new TransientError(err2.message, err2);
+                        throw err2;
+                    }
+                }
+                else
+                    throw err;
             }
             const choice = res.choices[0];
             if (!choice)

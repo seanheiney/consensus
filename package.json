@@ -24,7 +24,8 @@
     "LICENSE",
     "install.sh",
     "install.ps1",
-    "scripts"
+    "scripts",
+    "suites"
   ],
   "engines": {
     "node": ">=22"

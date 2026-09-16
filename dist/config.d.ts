@@ -126,11 +126,12 @@ export declare function buildPanel(members: Member[], defaultEffort: Effort | un
     judge: Panelist;
 };
 /**
- * The captain: the best model available, preferring a vendor that is NOT on the
- * panel (neutral), then a different model of a vendor that is, then the strongest
- * seatable model even if a seat uses it (it runs under the captain's own prompt).
+ * The captain: the best model available on this machine (the strongest seatable
+ * frontier model, in catalog order). It may be the same model as a seat; it runs
+ * as a separate thread under the captain's own prompt. Use "neutral" to prefer a
+ * vendor that is not on the panel.
  */
-export declare function autoCaptain(members: Member[], statuses: VendorStatus[]): Promise<string>;
+export declare function autoCaptain(members: Member[], statuses: VendorStatus[], mode?: "auto" | "neutral"): Promise<string>;
 /**
  * Pick a judge that did not debate: the strongest seatable model of a vendor
  * that is NOT on the panel; failing that, a different model of a vendor that is.

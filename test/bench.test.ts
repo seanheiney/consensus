@@ -84,3 +84,17 @@ describe("bench", () => {
     expect(renderBench(report)).toContain("FAILED");
   });
 });
+
+describe("self-consistency arm", () => {
+  it("samples N times then merges with the same model, and sums usage", async () => {
+    let calls = 0;
+    const m = fakePanelist("a:m", (req) => (req.phase === "synthesize" ? "merged best" : `sample ${++calls}`));
+    const grader = fakePanelist("g:m", (req) => JSON.stringify({ grades: [...req.messages[0]!.content.matchAll(/### Answer (\w)/g)].map(([, l]) => ({ answer: l, accuracy: 9, quality: 9, notes: "" })) }));
+    const report = await runBench({ suite: { cases: [SAMPLE_SUITE.cases[1]!] }, profiles: [{ name: "selfx3:a:m", panel: [m], judge: m, rounds: 0, effort: "low", single: m, samples: 3 }], grader });
+    expect(m.calls).toHaveLength(4);
+    expect(m.calls[3]!.messages[0]!.content).toContain("### Answer 3");
+    expect(report.results[0]!.answer).toBe("merged best");
+    expect(report.results[0]!.usage.inputTokens).toBe(40);
+    expect(renderBench(report)).toContain("selfx");
+  });
+});

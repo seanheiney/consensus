@@ -54,24 +54,34 @@ export function createCompatPanelist(opts: CompatOptions): Panelist {
               ? { reasoning_effort: effort }
               : {}
             : { reasoning_effort: effort };
+      const build = (structured: boolean): OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming => ({
+        model,
+        messages: [
+          { role: "system", content: req.system },
+          ...req.messages.map((m) => ({ role: m.role, content: m.content })),
+        ],
+        max_completion_tokens: req.maxTokens ?? 32000,
+        ...(reasoningParams as object),
+        ...(req.json
+          ? structured && req.jsonSchema
+            ? { response_format: { type: "json_schema" as const, json_schema: { name: "consensus_phase", schema: req.jsonSchema, strict: true } } }
+            : { response_format: { type: "json_object" as const } }
+          : {}),
+      });
       let res: OpenAI.Chat.Completions.ChatCompletion;
       try {
-        res = await client.chat.completions.create(
-          {
-            model,
-            messages: [
-              { role: "system", content: req.system },
-              ...req.messages.map((m) => ({ role: m.role, content: m.content })),
-            ],
-            max_completion_tokens: req.maxTokens ?? 32000,
-            ...(reasoningParams as object),
-            ...(req.json ? { response_format: { type: "json_object" as const } } : {}),
-          },
-          { signal: req.signal },
-        );
+        res = await client.chat.completions.create(build(true), { signal: req.signal });
       } catch (err) {
         if (isTransient(err)) throw new TransientError((err as Error).message, err);
-        throw err;
+        // Gateways that don't take json_schema (or reject this one) fall back to json_object + prompt.
+        if (err instanceof OpenAI.BadRequestError && req.jsonSchema) {
+          try {
+            res = await client.chat.completions.create(build(false), { signal: req.signal });
+          } catch (err2) {
+            if (isTransient(err2)) throw new TransientError((err2 as Error).message, err2);
+            throw err2;
+          }
+        } else throw err;
       }
       const choice = res.choices[0];
       if (!choice) throw new Error(`${opts.provider} returned no choices`);

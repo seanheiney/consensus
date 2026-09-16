@@ -60,7 +60,7 @@ export function createMcpServer(): McpServer {
         transcript: z.boolean().optional().describe("Return the full report and debate transcript instead of the short summary."),
         max_cost: z.number().positive().optional().describe("Abort once spend billed to API keys exceeds this many USD (default from the user's config)."),
         max_spend: z.number().positive().optional().describe("Abort once billed spend plus the list-price equivalent of subscription seats exceeds this many USD."),
-        captain: z.string().optional().describe("Captain spec, 'auto' (default: best available model, preferring one not on the panel) or 'none'. The captain moderates each round, referees disputes, facilitates, and writes the report."),
+        captain: z.string().optional().describe("Captain spec, 'auto' (default: best available model, as a separate thread even if a seat uses it), 'neutral' (prefer a vendor not on the panel) or 'none'. The captain moderates each round, referees disputes, facilitates, and writes the report."),
       },
       annotations: { title: "Panel consensus", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },

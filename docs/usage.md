@@ -516,3 +516,5 @@ consensus "…" --judge codex:gpt-5.6-sol          # captain moderates, but this
 ```
 
 In a profile: `"captain": "auto" | "<spec>" | "none"`. The debate log shows each round's brief and questions under "captain's brief"; `run.json` records the captain and every brief; the report footer counts rounds moderated and rulings made.
+
+> Captain modes: `auto` (default) is the best available model on your machine, run as a separate thread even if a seat uses the same model; `neutral` prefers a vendor that is not on the panel; a spec names one; `none` disables moderation. Benchmark control arms: `--baseline <spec>` (one answer, no debate) and `--self-consistency <spec>xN` (the same model answers N times and merges its own best: more tokens, no debate). A harder judgment suite ships at `suites/judgment.json`.

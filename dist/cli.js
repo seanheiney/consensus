@@ -95,7 +95,7 @@ program
     .option("-c, --context <path>", "extra context file (code, docs, constraints) appended to the problem")
     .option("--profile <name>", "model profile to use (see `consensus profiles`)")
     .option("-p, --panel <specs>", "comma-separated panelists, e.g. claude,codex:gpt-5.6-sol,xai:grok-4.6#max")
-    .option("--captain <spec|auto|none>", "captain: moderates after each critique round, referees disputes, facilitates, writes the report (default auto = best available model, preferring one not on the panel)")
+    .option("--captain <spec|auto|neutral|none>", "captain: moderates after each critique round, referees disputes, facilitates, writes the report (default auto = best available model, even if a seat uses it, as a separate thread; neutral = prefer a vendor not on the panel)")
     .option("-j, --judge <spec>", "override who writes the synthesis: a seat spec or `external:<spec>` (default: the captain)")
     .option("-r, --rounds <n>", "max critique/revise rounds", parseIntArg)
     .option("-e, --effort <level>", "low|medium|high|xhigh|max (default for models without their own #effort)", parseEffort)
@@ -156,7 +156,7 @@ program
         log(dim(`panel${r.profile ? ` (${r.profile})` : ` (${r.source})`}: ${seats}`));
         const onPanel = r.panel.some((x) => x.id === r.judge.id);
         if (r.captain)
-            log(dim(`captain: ${r.captain.id}${r.panel.some((x) => x.id === r.captain.id) ? " (also a seat)" : " (not on the panel)"}: moderates each round, referees disputes, may grant one extra round, writes the report`));
+            log(dim(`captain: ${r.captain.id}${r.panel.some((x) => x.model === r.captain.model && x.provider === r.captain.provider) ? " (same model as a seat, separate thread)" : " (not on the panel)"}: moderates each round, referees disputes, may grant one extra round, writes the report`));
         const ceilings = [o.maxCost ?? cfg.maxCostUsd ? `billed ceiling $${o.maxCost ?? cfg.maxCostUsd}` : "", o.maxSpend ?? cfg.maxSpendUsd ? `total ceiling $${o.maxSpend ?? cfg.maxSpendUsd}` : ""].filter(Boolean).join(", ");
         const est = estimateMinutes(r.panel.length, r.rounds, r.effort);
         log(dim(`judge: ${r.judge.id}${onPanel ? "" : " (external, did not debate)"}  rounds: ${r.rounds}  cost: ${cliSeats === r.panel.length ? "subscription quota" : cliSeats ? "subscription quota + API tokens" : "API tokens"}; up to ${r.panel.length * (1 + 2 * r.rounds) + 1} model calls${ceilings ? `; ${ceilings}` : ""}`));
@@ -727,6 +727,7 @@ bench
     .option("--parallel", "run profiles concurrently")
     .option("-t, --trials <n>", "repeat each case this many times per profile and average", parseIntArg)
     .option("-b, --baseline <specs>", "comma-separated single-model baseline arms (no debate), e.g. claude:claude-opus-5,codex:gpt-5.6-sol")
+    .option("--self-consistency <specs>", "comma-separated self-consistency arms: spec[xN] (same model answers N times, default 3, then merges its best), e.g. claude:claude-opus-5x3")
     .option("-o, --out <dir>", "output directory (default: .consensus/bench/<timestamp>)")
     .option("--json", "print results JSON instead of the report")
     .action(async (o) => {
@@ -742,6 +743,13 @@ bench
     for (const spec of (o.baseline ?? "").split(",").map((x) => x.trim()).filter(Boolean)) {
         const single = createPanelist(spec, { effort: cfg.effort ?? "high", env: credentialEnv() });
         targets.push({ name: `single:${spec}`, panel: [single], judge: single, rounds: 0, effort: cfg.effort ?? "high", single });
+    }
+    for (const raw of (o.selfConsistency ?? "").split(",").map((x) => x.trim()).filter(Boolean)) {
+        const m = raw.match(/^(.*?)(?:x(\d+))?$/);
+        const spec = m[1];
+        const samples = Number(m[2] ?? 3);
+        const single = createPanelist(spec, { effort: cfg.effort ?? "high", env: credentialEnv() });
+        targets.push({ name: `selfx${samples}:${spec}`, panel: [single], judge: single, rounds: 0, effort: cfg.effort ?? "high", single, samples });
     }
     let suite = o.suite ? await loadSuite(o.suite) : await loadSuite("consensus.bench.json").catch(() => SAMPLE_SUITE);
     if (o.cases) {
