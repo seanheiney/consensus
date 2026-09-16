@@ -1,8 +1,46 @@
+import { TransientError } from "../types.js";
 import { extractJson } from "./json.js";
 import { CritiqueSchema, RevisionSchema } from "./schemas.js";
 import { SYSTEM_PROMPT, critiquePrompt, proposePrompt, revisePrompt, synthesizePrompt } from "./prompts.js";
+import { z } from "zod";
 import { CostLimitError, estimateCost } from "../cost.js";
 const TRANSIENT = /429|rate.?limit|overloaded|529|503|timeout|timed out|ECONNRESET|EPIPE|temporar|try again|SIGTERM/i;
+/** Small seeded PRNG (mulberry32) so label and ordering shuffles are reproducible from run.json's seed. */
+function mulberry32(seed) {
+    let a = seed >>> 0;
+    return () => {
+        a = (a + 0x6d2b79f5) >>> 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+/** Strip zod's `default` annotations and close objects so the schema is acceptable to strict structured-output APIs. */
+export function toStrictJsonSchema(schema) {
+    const js = z.toJSONSchema(schema, { target: "draft-7" });
+    const walk = (node) => {
+        if (!node || typeof node !== "object")
+            return;
+        const o = node;
+        delete o.default;
+        delete o.$schema;
+        if (o.type === "object" && o.properties && typeof o.properties === "object") {
+            o.additionalProperties = false;
+            o.required = Object.keys(o.properties);
+            for (const v of Object.values(o.properties))
+                walk(v);
+        }
+        if (o.items)
+            walk(o.items);
+        for (const k of ["anyOf", "oneOf", "allOf"])
+            if (Array.isArray(o[k]))
+                for (const v of o[k])
+                    walk(v);
+    };
+    walk(js);
+    return js;
+}
 const LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 function addUsage(a, b) {
     if (!b)
@@ -20,11 +58,11 @@ function newRunId() {
     const stamp = d.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
     return `${stamp}-${Math.random().toString(36).slice(2, 8)}`;
 }
-/** Fisher-Yates with Math.random; anonymization only, not security. */
-function shuffle(arr) {
+/** Fisher-Yates with an injectable RNG; anonymization only, not security. */
+function shuffle(arr, rnd = Math.random) {
     const a = arr.slice();
     for (let i = a.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+        const j = Math.floor(rnd() * (i + 1));
         [a[i], a[j]] = [a[j], a[i]];
     }
     return a;
@@ -45,8 +83,11 @@ export class ConsensusEngine {
         const rounds = Math.max(1, this.opts.rounds ?? 3);
         const effort = this.opts.effort ?? "high";
         const judge = this.opts.judge ?? this.opts.panel[0];
+        const seed = this.opts.seed ?? (Math.floor(Math.random() * 0xffffffff) >>> 0);
+        const rnd = mulberry32(seed);
+        this.rnd = rnd;
         // Anonymize: shuffle label assignment so labels carry no provider signal.
-        const states = shuffle(this.opts.panel).map((panelist, i) => ({
+        const states = shuffle(this.opts.panel, rnd).map((panelist, i) => ({
             panelist,
             label: LABELS[i],
             answer: "",
@@ -58,7 +99,7 @@ export class ConsensusEngine {
             startedAt: new Date().toISOString(),
             prompt,
             context,
-            options: { rounds, defaultEffort: effort, maxCostUsd: this.opts.maxCostUsd },
+            options: { rounds, defaultEffort: effort, maxCostUsd: this.opts.maxCostUsd, seed },
             labels: Object.fromEntries(states.map((s) => [s.label, s.panelist.id])),
             seats: states.map((s) => ({
                 id: s.panelist.id,
@@ -77,6 +118,7 @@ export class ConsensusEngine {
             usage: {},
             dropped: {},
         };
+        this.current = run;
         this.emit({ type: "start", runId: run.id, labels: run.labels, seats: run.seats, prompt, context, rounds, effort });
         // ---- Phase 1: independent proposals -------------------------------
         this.emit({ type: "phase", phase: "propose" });
@@ -95,7 +137,8 @@ export class ConsensusEngine {
             const answers = this.answers(states);
             const critiques = {};
             await this.forEachActive(states, `critique:${round}`, async (s) => {
-                const c = await this.callJson(s, [{ role: "user", content: critiquePrompt({ prompt, context, round, answers, own: s.label }) }], CritiqueSchema, "critique");
+                // Each critic sees the answers in its own order (position bias mitigation); labels are unchanged.
+                const c = await this.callJson(s, [{ role: "user", content: critiquePrompt({ prompt, context, round, answers: this.reorder(answers), own: s.label }) }], CritiqueSchema, "critique");
                 // Drop reviews of labels that no longer exist / self-reviews by mistake.
                 c.reviews = c.reviews.filter((r) => r.answer !== s.label && r.answer in answers);
                 critiques[s.label] = c;
@@ -127,7 +170,7 @@ export class ConsensusEngine {
             this.emit({ type: "phase", phase: "revise", round });
             const revisions = {};
             await this.forEachActive(states, `revise:${round}`, async (s) => {
-                const r = await this.callJson(s, [{ role: "user", content: revisePrompt({ prompt, context, round, answers, critiques, own: s.label }) }], RevisionSchema, "revise");
+                const r = await this.callJson(s, [{ role: "user", content: revisePrompt({ prompt, context, round, answers: this.reorder(answers), critiques, own: s.label }) }], RevisionSchema, "revise");
                 revisions[s.label] = r;
                 s.answer = r.answer.trim();
                 this.emit({ type: "revision", label: s.label, panelist: s.panelist.id, round, revision: r });
@@ -184,6 +227,11 @@ export class ConsensusEngine {
         return run;
     }
     // ---- helpers ---------------------------------------------------------
+    rnd = Math.random;
+    /** Same answers, shuffled order, labels intact. */
+    reorder(answers) {
+        return Object.fromEntries(shuffle(Object.entries(answers), this.rnd));
+    }
     active(states) {
         return states.filter((s) => s.active);
     }
@@ -231,7 +279,8 @@ export class ConsensusEngine {
                 }
                 catch (err) {
                     const msg = err instanceof Error ? err.message : String(err);
-                    if (this.opts.retry === false || !TRANSIENT.test(msg) || this.opts.signal?.aborted)
+                    const transient = err instanceof TransientError || TRANSIENT.test(msg);
+                    if (this.opts.retry === false || !transient || this.opts.signal?.aborted)
                         throw err;
                     await new Promise((r) => setTimeout(r, 4000));
                     await fn(s);
@@ -253,14 +302,27 @@ export class ConsensusEngine {
             return;
         const usage = Object.fromEntries(states.map((s) => [s.panelist.id, s.usage]));
         const { usd } = estimateCost(usage);
-        if (usd !== null && usd > limit)
-            throw new CostLimitError(usd, limit, phase);
+        if (usd !== null && usd > limit) {
+            const err = new CostLimitError(usd, limit, phase);
+            // Hand back what exists so the caller can save the partial debate instead of losing it.
+            if (this.current) {
+                this.current.finalAnswers = this.answers(states);
+                for (const s of states)
+                    if (s.usage.reported)
+                        this.current.usage[s.panelist.id] = { ...s.usage, reported: undefined };
+                this.current.finishedAt = new Date().toISOString();
+                err.partial = this.current;
+            }
+            throw err;
+        }
     }
-    async call(s, messages, phase, json = false) {
+    current;
+    async call(s, messages, phase, json = false, jsonSchema) {
         const res = await s.panelist.complete({
             system: SYSTEM_PROMPT,
             messages,
             json,
+            jsonSchema,
             effort: this.opts.effort,
             maxTokens: this.opts.maxTokens,
             signal: this.opts.signal,
@@ -275,7 +337,8 @@ export class ConsensusEngine {
     }
     /** Call, parse JSON, validate; on failure ask the model once to repair. */
     async callJson(s, messages, schema, phase) {
-        const first = await this.call(s, messages, phase, true);
+        const jsonSchema = toStrictJsonSchema(schema);
+        const first = await this.call(s, messages, phase, true, jsonSchema);
         const attempt = (text) => schema.parse(extractJson(text));
         try {
             return attempt(first);
@@ -290,7 +353,7 @@ export class ConsensusEngine {
                     content: `Your previous response could not be used: ${why.slice(0, 800)}\n\nRespond again with ONLY the JSON object, matching the requested shape exactly. No prose, no code fences.`,
                 },
             ];
-            const second = await this.call(s, repair, phase, true);
+            const second = await this.call(s, repair, phase, true, jsonSchema);
             return attempt(second);
         }
     }

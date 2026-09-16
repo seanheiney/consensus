@@ -53,6 +53,58 @@ async function viaCliRemove(bin: string, args: string[]): Promise<string | undef
 
 const home = homedir();
 
+function vscodeUserDir(): string {
+  switch (platform()) {
+    case "darwin":
+      return join(home, "Library", "Application Support", "Code", "User");
+    case "win32":
+      return join(process.env.APPDATA ?? join(home, "AppData", "Roaming"), "Code", "User");
+    default:
+      return join(process.env.XDG_CONFIG_HOME ?? join(home, ".config"), "Code", "User");
+  }
+}
+
+function zedSettingsPath(): string {
+  return platform() === "win32" ? join(process.env.APPDATA ?? join(home, "AppData", "Roaming"), "Zed", "settings.json") : join(process.env.XDG_CONFIG_HOME ?? join(home, ".config"), "zed", "settings.json");
+}
+
+/** Merge into a JSON file under an arbitrary key (VS Code `servers`, Zed `context_servers`). */
+async function mergeJsonKey(file: string, key: string, entry: Record<string, unknown>): Promise<string> {
+  let cfg: Record<string, unknown> = {};
+  let existing: string | undefined;
+  try {
+    existing = await readFile(file, "utf8");
+  } catch {
+    await mkdir(dirname(file), { recursive: true });
+  }
+  if (existing !== undefined && existing.trim()) {
+    try {
+      cfg = JSON.parse(existing) as Record<string, unknown>;
+    } catch (err) {
+      throw new Error(`${file} is not plain JSON (${(err as Error).message.split("\n")[0]}); not touching it. Add under "${key}": ${JSON.stringify({ [SKILL_NAME]: entry })}`);
+    }
+    await writeFile(`${file}.bak`, existing);
+  }
+  const bucket = (cfg[key] ??= {}) as Record<string, unknown>;
+  bucket[SKILL_NAME] = entry;
+  await writeFile(file, JSON.stringify(cfg, null, 2) + "\n");
+  return `wrote ${file}${existing ? ` (backup: ${file}.bak)` : ""}`;
+}
+
+async function removeJsonKey(file: string, key: string): Promise<string | undefined> {
+  let cfg: Record<string, unknown>;
+  try {
+    cfg = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+  const bucket = cfg[key] as Record<string, unknown> | undefined;
+  if (!bucket || !(SKILL_NAME in bucket)) return undefined;
+  delete bucket[SKILL_NAME];
+  await writeFile(file, JSON.stringify(cfg, null, 2) + "\n");
+  return `${file}: removed ${key}.${SKILL_NAME}`;
+}
+
 function claudeDesktopConfigPath(): string {
   switch (platform()) {
     case "darwin":
@@ -193,6 +245,30 @@ export function listHosts(): Host[] {
       installed: () => ({ mcp: fileHas(claudeDesktopConfigPath(), `"${SKILL_NAME}"`) }),
       installMcp: () => mergeMcpJson(claudeDesktopConfigPath(), mcpLaunchCommand({ absolute: true })),
       uninstall: async () => [await removeMcpJson(claudeDesktopConfigPath())].filter((x): x is string => !!x),
+    },
+    {
+      id: "vscode",
+      name: "VS Code (Copilot agent mode)",
+      detected: existsSync(vscodeUserDir()),
+      installed: () => ({ mcp: fileHas(join(vscodeUserDir(), "mcp.json"), `"${SKILL_NAME}"`), skill: existsSync(join(home, ".agents", "skills", SKILL_NAME, "SKILL.md")) }),
+      // User-level MCP servers live in <User>/mcp.json under "servers"; Copilot reads skills from ~/.agents/skills.
+      installMcp: () => {
+        const cmd = mcpLaunchCommand({ absolute: true });
+        return mergeJsonKey(join(vscodeUserDir(), "mcp.json"), "servers", { type: "stdio", command: cmd[0], args: cmd.slice(1) });
+      },
+      installSkill: async () => [await writeSkill(join(home, ".agents", "skills", SKILL_NAME))],
+      uninstall: async () => [await removeJsonKey(join(vscodeUserDir(), "mcp.json"), "servers")].filter((x): x is string => !!x),
+    },
+    {
+      id: "zed",
+      name: "Zed",
+      detected: existsSync(dirname(zedSettingsPath())),
+      installed: () => ({ mcp: fileHas(zedSettingsPath(), `"${SKILL_NAME}"`) }),
+      installMcp: () => {
+        const cmd = mcpLaunchCommand({ absolute: true });
+        return mergeJsonKey(zedSettingsPath(), "context_servers", { source: "custom", command: cmd[0], args: cmd.slice(1) });
+      },
+      uninstall: async () => [await removeJsonKey(zedSettingsPath(), "context_servers")].filter((x): x is string => !!x),
     },
     {
       id: "agents-standard",

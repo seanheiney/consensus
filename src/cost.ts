@@ -80,6 +80,8 @@ export function describeCost(c: CostEstimate): string {
 }
 
 export class CostLimitError extends Error {
+  /** The run so far (no synthesis), when the engine could capture it. */
+  partial?: import("./types.js").ConsensusRun;
   constructor(public readonly spentUsd: number, public readonly limitUsd: number, public readonly phase: string) {
     super(`Spend ceiling reached: ~$${spentUsd.toFixed(2)} billed to API keys after ${phase}, limit $${limitUsd.toFixed(2)} (--max-cost). Subscription seats are quota and are not counted.`);
     this.name = "CostLimitError";

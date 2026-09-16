@@ -1,5 +1,10 @@
 /** Shared types for the consensus engine. */
-export type Effort = "low" | "medium" | "high" | "max";
+export type Effort = "low" | "medium" | "high" | "xhigh" | "max";
+/** Thrown by providers for failures worth one retry (rate limit, overload, network, timeout). */
+export declare class TransientError extends Error {
+    readonly cause?: unknown;
+    constructor(message: string, cause?: unknown);
+}
 export interface ChatMessage {
     role: "user" | "assistant";
     content: string;
@@ -9,6 +14,8 @@ export interface CompletionRequest {
     messages: ChatMessage[];
     /** Hint that the response must be a single JSON object. */
     json?: boolean;
+    /** JSON Schema the response must satisfy; providers that support structured outputs enforce it. */
+    jsonSchema?: Record<string, unknown>;
     maxTokens?: number;
     effort?: Effort;
     signal?: AbortSignal;
@@ -108,6 +115,7 @@ export interface ConsensusRun {
         rounds: number;
         defaultEffort: Effort;
         maxCostUsd?: number;
+        seed?: number;
     };
     labels: Record<string, string>;
     /** What actually sat on the panel: model, effort and persona per seat. */
@@ -204,6 +212,8 @@ export interface ConsensusOptions {
     maxCostUsd?: number;
     /** Retry a seat once on a transient failure (rate limit, overload, timeout). Default true. */
     retry?: boolean;
+    /** Seed for label assignment and answer ordering; recorded in run.json so a run's shuffles are reproducible. */
+    seed?: number;
     onEvent?: (e: ConsensusEvent) => void;
     signal?: AbortSignal;
 }

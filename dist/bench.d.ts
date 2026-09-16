@@ -27,7 +27,7 @@ export interface BenchProfileTarget {
     panel: Panelist[];
     judge: Panelist;
     rounds: number;
-    effort: "low" | "medium" | "high" | "max";
+    effort: import("./types.js").Effort;
     /** Baseline arm: one model answering once, no debate. `panel`/`judge` are ignored. */
     single?: Panelist;
 }
@@ -72,10 +72,14 @@ export interface BenchReport {
     graderOverlap: string[];
 }
 export { estimateCost, priceFor } from "./cost.js";
+/**
+ * Grading is two-phase so the reference answer cannot leak into the subjective
+ * score: phase "quality" never sees the reference; phase "accuracy" does.
+ */
 export declare function gradePrompt(c: BenchCase, answers: {
     label: string;
     text: string;
-}[]): string;
+}[], phase?: "quality" | "accuracy"): string;
 export declare function gradeCase(grader: Panelist, c: BenchCase, answers: {
     key: string;
     text: string;

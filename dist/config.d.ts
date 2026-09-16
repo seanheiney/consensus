@@ -25,6 +25,7 @@ export declare const ProfileSchema: z.ZodObject<{
         low: "low";
         max: "max";
         medium: "medium";
+        xhigh: "xhigh";
     }>>;
     personas: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     substitutions: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -46,6 +47,7 @@ export declare const ConfigSchema: z.ZodObject<{
             low: "low";
             max: "max";
             medium: "medium";
+            xhigh: "xhigh";
         }>>;
         personas: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
         substitutions: z.ZodOptional<z.ZodArray<z.ZodString>>;
@@ -66,6 +68,7 @@ export declare const ConfigSchema: z.ZodObject<{
         low: "low";
         max: "max";
         medium: "medium";
+        xhigh: "xhigh";
     }>>;
     maxTokens: z.ZodOptional<z.ZodNumber>;
     runsDir: z.ZodOptional<z.ZodString>;
@@ -114,6 +117,11 @@ export declare function buildPanel(members: Member[], defaultEffort: Effort | un
     panel: Panelist[];
     judge: Panelist;
 };
+/**
+ * Pick a judge that did not debate: the strongest seatable model of a vendor
+ * that is NOT on the panel; failing that, a different model of a vendor that is.
+ */
+export declare function autoExternalJudge(members: Member[], statuses: VendorStatus[]): Promise<string>;
 /**
  * Turn portable `any:<model>` members into concrete specs for this machine:
  * the vendor's logged-in CLI, else its API key, else OpenRouter. Fails loudly

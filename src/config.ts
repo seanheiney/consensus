@@ -10,7 +10,7 @@ import { formatSpec } from "./providers/index.js";
 import type { VendorStatus } from "./doctor.js";
 import { scanVendors } from "./doctor.js";
 
-const EffortSchema = z.enum(["low", "medium", "high", "max"]);
+const EffortSchema = z.enum(["low", "medium", "high", "xhigh", "max"]);
 
 /**
  * A panel member: a model spec string `provider[:model][#effort][+persona]`,
@@ -201,7 +201,7 @@ export function buildPanel(
   if (dup) throw new Error(`Duplicate panel member "${dup}". Give repeated models different personas (spec+persona) or names.`);
   let judge = panel[0]!;
   if (judgeSpec?.startsWith("external:")) {
-    // A judge that did not argue the case. Written "external:<spec>".
+    // A judge that did not argue the case. Written "external:<spec>" (or "external:auto", resolved earlier).
     const { spec, persona, name } = splitMember(judgeSpec.slice("external:".length));
     let j = createPanelist(parseSpec(spec), { effort: defaultEffort, env });
     if (persona) j = withPersona(j, resolvePersona(persona, personaLibrary, name));
@@ -221,6 +221,36 @@ export function buildPanel(
   }
   return { panel, judge };
 }
+
+/**
+ * Pick a judge that did not debate: the strongest seatable model of a vendor
+ * that is NOT on the panel; failing that, a different model of a vendor that is.
+ */
+export async function autoExternalJudge(members: Member[], statuses: VendorStatus[]): Promise<string> {
+  const onPanel = new Set<string>();
+  const modelsOnPanel = new Set<string>();
+  for (const m of members) {
+    const p = parseSpec(splitMember(m).spec);
+    const hit = p.model ? findCatalogModel(p.model) : undefined;
+    const vendor = hit?.vendor ?? ((PROVIDERS_VENDOR as Record<string, string>)[p.provider] ?? p.provider);
+    onPanel.add(vendor);
+    if (p.model) modelsOnPanel.add(p.model);
+  }
+  for (const vendor of CATALOG_VENDORS) {
+    if (onPanel.has(vendor)) continue;
+    const pick = pickSeatable(vendor, "frontier", statuses);
+    if (pick) return pick.spec("high");
+  }
+  for (const vendor of CATALOG_VENDORS) {
+    if (!onPanel.has(vendor)) continue;
+    for (const tier of ["frontier", "standard", "budget"] as const) {
+      const pick = pickSeatable(vendor, tier, statuses);
+      if (pick && !modelsOnPanel.has(pick.model.id)) return pick.spec("high");
+    }
+  }
+  throw new Error("No model is available for an external judge that is not already on the panel; connect another vendor or name a judge explicitly.");
+}
+const PROVIDERS_VENDOR: Record<string, string> = { claude: "anthropic", codex: "openai", gemini: "google", grok: "xai", anthropic: "anthropic", openai: "openai", google: "google", xai: "xai" };
 
 /**
  * Turn portable `any:<model>` members into concrete specs for this machine:
@@ -268,17 +298,19 @@ export async function resolveRun(o: ResolveOptions): Promise<ResolvedRun> {
   let statuses: VendorStatus[] | undefined;
   const scan = async () => (statuses ??= await scanVendors(env));
   const concrete = async (members: Member[]): Promise<Member[]> => (hasPortable(members) ? resolvePortableMembers(members, await scan()) : members);
-  const concreteJudge = async (spec: string | undefined): Promise<string | undefined> => {
+  const concreteJudge = async (spec: string | undefined, members?: Member[]): Promise<string | undefined> => {
     if (!spec) return spec;
     const ext = spec.startsWith("external:");
-    const bare = ext ? spec.slice("external:".length) : spec;
-    if (!bare.startsWith("any:")) return spec;
-    const [m] = resolvePortableMembers([bare], await scan());
-    const out = typeof m === "string" ? m : m!.model;
-    return ext ? `external:${out}` : out;
+    let bare = ext ? spec.slice("external:".length) : spec;
+    if (ext && bare === "auto") bare = await autoExternalJudge(members ?? [], await scan());
+    if (bare.startsWith("any:")) {
+      const [m] = resolvePortableMembers([bare], await scan());
+      bare = typeof m === "string" ? m : m!.model;
+    }
+    return ext ? `external:${bare}` : bare;
   };
   if (o.panel?.length) {
-    const { panel, judge } = buildPanel(await concrete(o.panel), o.effort ?? cfg.effort, await concreteJudge(o.judge ?? cfg.judge), env, library);
+    const { panel, judge } = buildPanel(await concrete(o.panel), o.effort ?? cfg.effort, await concreteJudge(o.judge ?? cfg.judge, o.panel), env, library);
     return { panel, judge, rounds: o.rounds ?? cfg.rounds ?? 3, effort: o.effort ?? cfg.effort ?? "high", source: "flags" };
   }
 
@@ -290,12 +322,12 @@ export async function resolveRun(o: ResolveOptions): Promise<ResolvedRun> {
       throw new Error(`Unknown profile "${profileName}". ${known.length ? `Known: ${known.join(", ")}` : "No profiles defined; run `consensus setup` or `consensus profile create`."}`);
     }
     const effort = o.effort ?? prof.effort ?? cfg.effort ?? "high";
-    const { panel, judge } = buildPanel(await concrete(prof.panel), effort, await concreteJudge(o.judge ?? prof.judge), env, { ...library, ...prof.personas });
+    const { panel, judge } = buildPanel(await concrete(prof.panel), effort, await concreteJudge(o.judge ?? prof.judge, prof.panel), env, { ...library, ...prof.personas });
     return { panel, judge, rounds: o.rounds ?? prof.rounds ?? cfg.rounds ?? 3, effort, profile: profileName, source: "profile" };
   }
 
   if (cfg.panel?.length) {
-    const { panel, judge } = buildPanel(await concrete(cfg.panel), o.effort ?? cfg.effort, await concreteJudge(o.judge ?? cfg.judge), env, library);
+    const { panel, judge } = buildPanel(await concrete(cfg.panel), o.effort ?? cfg.effort, await concreteJudge(o.judge ?? cfg.judge, cfg.panel), env, library);
     return { panel, judge, rounds: o.rounds ?? cfg.rounds ?? 3, effort: o.effort ?? cfg.effort ?? "high", source: "config" };
   }
 
@@ -305,7 +337,7 @@ export async function resolveRun(o: ResolveOptions): Promise<ResolvedRun> {
       `Need at least 2 connected models, found ${specs.length}. Run \`consensus setup\` to connect your subscriptions or add API keys, or pass --panel.`,
     );
   }
-  const { panel, judge } = buildPanel(specs, o.effort ?? cfg.effort, o.judge ?? cfg.judge, env, library);
+  const { panel, judge } = buildPanel(specs, o.effort ?? cfg.effort, await concreteJudge(o.judge ?? cfg.judge, specs), env, library);
   return { panel, judge, rounds: o.rounds ?? cfg.rounds ?? 3, effort: o.effort ?? cfg.effort ?? "high", source: "auto" };
 }
 

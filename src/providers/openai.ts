@@ -1,13 +1,23 @@
 import OpenAI from "openai";
-import type { CompletionRequest, CompletionResult, Effort, Panelist } from "../types.js";
+import { TransientError, type CompletionRequest, type CompletionResult, type Effort, type Panelist } from "../types.js";
 import type { ProviderFactoryOptions } from "./types.js";
 
 const EFFORT: Record<Effort, OpenAI.ReasoningEffort> = {
   low: "low",
   medium: "medium",
   high: "high",
+  xhigh: "xhigh",
   max: "max",
 };
+
+function isTransient(err: unknown): boolean {
+  return (
+    err instanceof OpenAI.RateLimitError ||
+    err instanceof OpenAI.InternalServerError ||
+    err instanceof OpenAI.APIConnectionError ||
+    (err instanceof OpenAI.APIError && (err.status === 503 || err.status === 408))
+  );
+}
 
 /** Reasoning-capable model families that accept the `reasoning` parameter. */
 function isReasoningModel(model: string): boolean {
@@ -29,18 +39,33 @@ export function createOpenAIPanelist(opts: ProviderFactoryOptions): Panelist {
     effort: opts.effort,
     async complete(req: CompletionRequest): Promise<CompletionResult> {
       const effort = EFFORT[opts.effort ?? req.effort ?? "high"];
-      const res = await client.responses.create(
-        {
-          model,
-          instructions: req.system,
-          input: req.messages.map((m) => ({ role: m.role, content: m.content })),
-          max_output_tokens: req.maxTokens ?? 32000,
-          store: false,
-          ...(isReasoningModel(model) ? { reasoning: { effort } } : {}),
-          ...(req.json ? { text: { format: { type: "json_object" as const } } } : {}),
-        },
-        { signal: req.signal },
-      );
+      const build = (structured: boolean): OpenAI.Responses.ResponseCreateParamsNonStreaming => ({
+        model,
+        instructions: req.system,
+        input: req.messages.map((m) => ({ role: m.role, content: m.content })),
+        max_output_tokens: req.maxTokens ?? 32000,
+        store: false,
+        ...(isReasoningModel(model) ? { reasoning: { effort } } : {}),
+        ...(req.json
+          ? structured && req.jsonSchema
+            ? { text: { format: { type: "json_schema" as const, name: "consensus_phase", schema: req.jsonSchema, strict: true } } }
+            : { text: { format: { type: "json_object" as const } } }
+          : {}),
+      });
+      let res: OpenAI.Responses.Response;
+      try {
+        res = await client.responses.create(build(true), { signal: req.signal });
+      } catch (err) {
+        if (isTransient(err)) throw new TransientError((err as Error).message, err);
+        if (err instanceof OpenAI.BadRequestError && req.jsonSchema && /schema|format/i.test(err.message)) {
+          try {
+            res = await client.responses.create(build(false), { signal: req.signal });
+          } catch (err2) {
+            if (isTransient(err2)) throw new TransientError((err2 as Error).message, err2);
+            throw err2;
+          }
+        } else throw err;
+      }
       if (res.status === "incomplete") {
         throw new Error(`OpenAI response incomplete (${res.incomplete_details?.reason ?? "unknown"}); partial output discarded: ${res.output_text.slice(0, 120)}…`);
       }
@@ -48,10 +73,15 @@ export function createOpenAIPanelist(opts: ProviderFactoryOptions): Panelist {
         throw new Error(`OpenAI response status ${res.status}${res.error ? `: ${res.error.message}` : ""}`);
       }
       if (!res.output_text.trim()) throw new Error("OpenAI returned an empty answer");
+      const u = res.usage;
       return {
         text: res.output_text,
-        usage: res.usage
-          ? { inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens }
+        usage: u
+          ? {
+              inputTokens: Math.max(0, u.input_tokens - (u.input_tokens_details?.cached_tokens ?? 0)),
+              cacheReadTokens: u.input_tokens_details?.cached_tokens ?? 0,
+              outputTokens: u.output_tokens, // includes reasoning tokens, which OpenAI bills as output
+            }
           : undefined,
       };
     },

@@ -58,6 +58,7 @@ Any other option is passed through to \`consensus setup\`.
 Environment:
   CONSENSUS_INSTALL_DIR   install prefix (binary lands in \$CONSENSUS_INSTALL_DIR/bin)
   CONSENSUS_VERSION       git tag to install (e.g. v0.1.0); default: main
+  CONSENSUS_SHA256        with CONSENSUS_VERSION: verify the tarball checksum before installing
   CONSENSUS_REPO          tarball/spec to install instead of the npm package
   CONSENSUS_MIN_NODE      minimum Node major version (default: 22)
   CONSENSUS_SYSTEM_NODE   set to 1 to allow a sudo/apt Node install on Linux
@@ -145,7 +146,16 @@ fi
 if ! try_install "$PKG"; then
   if grep -qiE "E404|404 Not Found" "$LOG"; then
     info "$PKG is not on npm yet; installing from $REPO"
-    try_install "$REPO" || { cat "$LOG" >&2; die "install from $REPO failed (see output above)"; }
+    if [ -n "${CONSENSUS_SHA256:-}" ]; then
+      # Optional integrity check for pinned installs: CONSENSUS_VERSION=v0.1.0 CONSENSUS_SHA256=<sha256 of the tarball>
+      TARBALL=$(mktemp); curl -fsSL "$REPO" -o "$TARBALL" || die "could not download $REPO"
+      ACTUAL=$( (command -v sha256sum >/dev/null 2>&1 && sha256sum "$TARBALL" || shasum -a 256 "$TARBALL") | cut -d' ' -f1)
+      [ "$ACTUAL" = "$CONSENSUS_SHA256" ] || die "checksum mismatch for $REPO: expected $CONSENSUS_SHA256 got $ACTUAL"
+      info "checksum verified"
+      try_install "$TARBALL" || { cat "$LOG" >&2; die "install from verified tarball failed (see output above)"; }
+    else
+      try_install "$REPO" || { cat "$LOG" >&2; die "install from $REPO failed (see output above)"; }
+    fi
   elif grep -qiE "EACCES|permission denied" "$LOG"; then
     # Global dir not writable: switch to a user-local prefix rather than sudo.
     PREFIX="$HOME/.npm-global"

@@ -55,7 +55,7 @@ export function createMcpServer(): McpServer {
         profile: z.string().optional().describe("Named model profile (see consensus_profiles). Omit for the user's default."),
         panel: z.array(z.string()).optional().describe("Override the panel with seats like 'claude', 'codex:gpt-5.6-sol', 'openai:gpt-6-astra#max', 'claude+skeptic'."),
         rounds: z.number().int().min(1).max(10).optional().describe("Max critique/revise rounds (default from profile, else 3). 1 = critique only, no revision."),
-        effort: z.enum(["low", "medium", "high", "max"]).optional().describe("Reasoning effort for seats without their own."),
+        effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional().describe("Reasoning effort for seats without their own."),
         transcript: z.boolean().optional().describe("Return the full report and debate transcript instead of the short summary."),
       },
     },

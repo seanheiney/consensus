@@ -138,7 +138,7 @@ export function detectCliProviders(env = process.env) {
 }
 /** @deprecated use detectApiProviders */
 export const detectProviders = detectApiProviders;
-const EFFORTS = new Set(["low", "medium", "high", "max"]);
+const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
 /**
  * Parse a panelist spec.
  *   "claude"                             -> Claude Code CLI, its default model
@@ -155,7 +155,7 @@ export function parseSpec(spec) {
     if (hash !== -1) {
         const e = trimmed.slice(hash + 1);
         if (!EFFORTS.has(e))
-            throw new Error(`Bad effort "${e}" in "${spec}". Use #low, #medium, #high or #max.`);
+            throw new Error(`Bad effort "${e}" in "${spec}". Use #low, #medium, #high, #xhigh or #max.`);
         effort = e;
         trimmed = trimmed.slice(0, hash);
     }

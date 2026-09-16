@@ -23,13 +23,14 @@
     "PACKS.md",
     "LICENSE",
     "install.sh",
-    "install.ps1"
+    "install.ps1",
+    "scripts"
   ],
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/build-info.mjs",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",

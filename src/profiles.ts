@@ -11,6 +11,7 @@ const EFFORTS: { value: Effort; label: string; hint: string }[] = [
   { value: "low", label: "low", hint: "fast, cheap, shallow" },
   { value: "medium", label: "medium", hint: "routine" },
   { value: "high", label: "high", hint: "default; hard problems" },
+  { value: "xhigh", label: "xhigh", hint: "Claude Code's default for coding; Claude, OpenAI and Codex support it, others map to high" },
   { value: "max", label: "max", hint: "slowest, most thorough" },
 ];
 
@@ -66,12 +67,19 @@ export function materializePreset(preset: Preset, statuses: VendorStatus[]): Pro
   return { description: preset.description, panel, judge: panel[0]!.replace(/#\w+$/, ""), rounds: preset.rounds, effort: preset.effort, ...(substitutions.length ? { substitutions } : {}) };
 }
 
-/** Every preset your connections can satisfy. */
+/** Every preset your connections can satisfy. Judges rotate across seats so no vendor is always the judge. */
 export function starterProfiles(statuses: VendorStatus[]): Record<string, Profile> {
   const out: Record<string, Profile> = {};
+  let i = 0;
   for (const preset of PRESETS) {
     const prof = materializePreset(preset, statuses);
-    if (prof) out[preset.name] = prof;
+    if (!prof) continue;
+    if (preset.shape === "per-vendor" && prof.panel.length > 1) {
+      const seat = prof.panel[i % prof.panel.length]!;
+      prof.judge = (typeof seat === "string" ? seat : seat.model).replace(/#\w+(?=\+|$)/, "");
+      i++;
+    }
+    out[preset.name] = prof;
   }
   return out;
 }

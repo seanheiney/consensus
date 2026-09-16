@@ -178,7 +178,7 @@ export interface ParsedSpec {
   effort?: Effort;
 }
 
-const EFFORTS = new Set(["low", "medium", "high", "max"]);
+const EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
 
 /**
  * Parse a panelist spec.
@@ -195,7 +195,7 @@ export function parseSpec(spec: string): ParsedSpec {
   const hash = trimmed.lastIndexOf("#");
   if (hash !== -1) {
     const e = trimmed.slice(hash + 1);
-    if (!EFFORTS.has(e)) throw new Error(`Bad effort "${e}" in "${spec}". Use #low, #medium, #high or #max.`);
+    if (!EFFORTS.has(e)) throw new Error(`Bad effort "${e}" in "${spec}". Use #low, #medium, #high, #xhigh or #max.`);
     effort = e as Effort;
     trimmed = trimmed.slice(0, hash);
   }

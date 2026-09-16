@@ -9,7 +9,8 @@ import { credentialEnv, loadCredentials } from "./credentials.js";
 import { createPack, describePack, diffPack, installPack, readPack, removePack } from "./packs.js";
 import { configWarnings } from "./config.js";
 import { ensureGitignore } from "./hosts.js";
-import { describeCost, estimateCost } from "./cost.js";
+import { CostLimitError, describeCost, estimateCost } from "./cost.js";
+import { setDefaultTimeout } from "./providers/cli.js";
 import { probeSpecs, scanVendors } from "./doctor.js";
 import { installProjectMcp, installProjectSkills, listHosts, mcpLaunchCommand } from "./hosts.js";
 import { describeProfile, editProfile, materializePreset, memberLabel } from "./profiles.js";
@@ -27,6 +28,15 @@ import { eventToTerminal, openDebateLog } from "./debatelog.js";
 import { join } from "node:path";
 const require = createRequire(import.meta.url);
 const { version } = require("../package.json");
+let buildInfo = "";
+try {
+    const bi = require("./build-info.json");
+    if (bi.commit && bi.commit !== "unknown")
+        buildInfo = ` (${bi.commit}${bi.builtAt ? `, built ${bi.builtAt.slice(0, 10)}` : ""})`;
+}
+catch {
+    /* not built with build-info */
+}
 import { G, bold, dim, green, log, progressLogger, red, yellow } from "./progress.js";
 import { preflight } from "./doctor.js";
 import { renderRunHtml } from "./store.js";
@@ -38,8 +48,8 @@ function parseIntArg(v) {
     return n;
 }
 function parseEffort(v) {
-    if (!["low", "medium", "high", "max"].includes(v))
-        throw new InvalidArgumentError("must be low|medium|high|max");
+    if (!["low", "medium", "high", "xhigh", "max"].includes(v))
+        throw new InvalidArgumentError("must be low|medium|high|xhigh|max");
     return v;
 }
 async function readPrompt(arg, file) {
@@ -58,7 +68,7 @@ async function readPrompt(arg, file) {
 const program = new Command()
     .name("consensus")
     .description("Throw a problem at a panel of frontier models, let them debate, get one consensus answer.")
-    .version(version);
+    .version(`${version}${buildInfo}`);
 // ---- run ---------------------------------------------------------------
 program
     .command("run", { isDefault: true })
@@ -66,15 +76,18 @@ program
     .argument("[prompt]", "the problem to solve ('-' or omitted reads stdin)")
     .option("-f, --file <path>", "read the prompt from a file")
     .option("-c, --context <path>", "extra context file (code, docs, constraints) appended to the problem")
-    .option("-P, --profile <name>", "model profile to use (see `consensus profiles`)")
+    .option("--profile <name>", "model profile to use (see `consensus profiles`)")
     .option("-p, --panel <specs>", "comma-separated panelists, e.g. claude,codex:gpt-5.6-sol,xai:grok-4.6#max")
-    .option("-j, --judge <spec>", "panelist that writes the final synthesis")
+    .option("-j, --judge <spec>", "who writes the synthesis: a seat spec, `external:<spec>` for a model that did not debate, or `external:auto`")
     .option("-r, --rounds <n>", "max critique/revise rounds", parseIntArg)
-    .option("-e, --effort <level>", "low|medium|high|max (default for models without their own #effort)", parseEffort)
+    .option("-e, --effort <level>", "low|medium|high|xhigh|max (default for models without their own #effort)", parseEffort)
     .option("--max-tokens <n>", "max output tokens per call", parseIntArg)
     .option("--max-cost <usd>", "abort once the estimated API list-price spend exceeds this (subscription seats aren't counted)", (v) => { const n = Number(v); if (!(n > 0))
     throw new InvalidArgumentError("must be a positive number"); return n; })
     .option("--no-retry", "do not retry a seat once on a transient failure")
+    .option("--timeout <minutes>", "kill any single model call after this many minutes (default 20)", (v) => { const n = Number(v); if (!(n > 0))
+    throw new InvalidArgumentError("must be a positive number"); return n; })
+    .option("--seed <n>", "seed for label assignment and answer ordering (recorded in run.json; reuse to reproduce shuffles)", parseIntArg)
     .option("--force", "run even if pre-flight finds a seat that cannot be reached")
     .option("--json", "print the full run as JSON instead of the markdown report")
     .option("--transcript", "append the full debate transcript to the report")
@@ -152,6 +165,8 @@ program
         else
             pending.push(e);
     };
+    if (o.timeout)
+        setDefaultTimeout(o.timeout * 60_000);
     const engine = new ConsensusEngine({
         panel: r.panel,
         judge: r.judge,
@@ -160,6 +175,7 @@ program
         maxTokens: o.maxTokens ?? cfg.maxTokens,
         maxCostUsd: o.maxCost,
         retry: o.retry !== false,
+        seed: o.seed,
         onEvent,
         signal: ac.signal,
     });
@@ -167,9 +183,19 @@ program
     try {
         run = await engine.run(prompt, context);
     }
-    finally {
+    catch (err) {
         await debate?.close();
+        if (err instanceof CostLimitError && err.partial && o.save !== false) {
+            // Keep the debate so far; the user paid for it.
+            err.partial.synthesis = `(no synthesis: ${err.message})`;
+            const dir = await saveRun(err.partial, runsDir);
+            log(yellow(`${err.message}\nPartial debate saved to ${dir} (no synthesis). Exit code 3.`));
+            process.exitCode = 3;
+            return;
+        }
+        throw err;
     }
+    await debate?.close();
     const out = o.json ? JSON.stringify(run, null, 2) : renderReport(run, { transcript: o.transcript });
     process.stdout.write(out + "\n");
     const dropped = Object.keys(run.dropped);
@@ -319,15 +345,20 @@ profile
     .description("build a profile with the interactive model selector, or from a preset")
     .option("--preset <preset>", `start from a preset: ${PRESETS.map((x) => x.name).join(", ")}`)
     .option("--edit", "with --preset: open the selector to tweak it before saving")
+    .option("--force", "overwrite an existing profile of the same name without asking")
     .action(async (name, o) => {
     const cfg = await loadUserConfig();
     const statuses = await scanVendors(credentialEnv());
     let r;
-    if (name && cfg.profiles?.[name] && !o.edit) {
+    if (name && cfg.profiles?.[name] && !o.edit && !o.force) {
+        if (!process.stdin.isTTY)
+            throw new Error(`Profile "${name}" already exists. Pass --force to overwrite it (no terminal to ask).`);
         const ok = await p.confirm({ message: `Profile "${name}" already exists. Overwrite it?`, initialValue: false });
         if (p.isCancel(ok) || !ok)
             return log("left unchanged");
     }
+    if (!o.preset && !process.stdin.isTTY)
+        throw new Error("profile create without --preset is interactive; run it in a terminal or use --preset <name>.");
     if (o.preset) {
         const preset = PRESETS.find((x) => x.name === o.preset);
         if (!preset)
@@ -353,6 +384,7 @@ profile
 });
 profile
     .command("edit")
+    .description("reopen the interactive picker on an existing profile")
     .argument("<name>")
     .action(async (name) => {
     const cfg = await loadUserConfig();
@@ -379,6 +411,7 @@ profile
 });
 profile
     .command("delete")
+    .description("delete a profile (the default moves to the next one)")
     .argument("<name>")
     .action(async (name) => {
     const cfg = await loadUserConfig();
@@ -420,6 +453,7 @@ profile
 });
 profile
     .command("show")
+    .description("print one profile's seats, judge, rounds and effort")
     .argument("<name>")
     .action(async (name) => {
     const cfg = await loadConfig();
@@ -485,6 +519,7 @@ personaCmd
 });
 personaCmd
     .command("remove")
+    .description("delete one of your custom personas")
     .argument("<name>")
     .action(async (name) => {
     const cfg = await loadUserConfig();
@@ -729,6 +764,7 @@ pack
 });
 pack
     .command("remove")
+    .description("remove an installed pack's profiles and personas")
     .argument("<name>")
     .action(async (name) => {
     const cfg = await loadUserConfig();

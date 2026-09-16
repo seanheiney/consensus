@@ -19,8 +19,8 @@ describe("bench", () => {
     expect(() => BenchSuiteSchema.parse(SAMPLE_SUITE)).not.toThrow();
     expect(SAMPLE_SUITE.cases.some((c) => c.expected)).toBe(true);
     expect(SAMPLE_SUITE.cases.some((c) => c.rubric && !c.expected)).toBe(true);
-    expect(gradePrompt(SAMPLE_SUITE.cases[0]!, [{ label: "A", text: "60" }])).toContain("Reference answer (ground truth)");
-    expect(gradePrompt(SAMPLE_SUITE.cases[4]!, [{ label: "A", text: "x" }])).toContain("Set accuracy to null");
+    expect(gradePrompt(SAMPLE_SUITE.cases[0]!, [{ label: "A", text: "60" }], "accuracy")).toContain("Reference answer (ground truth)");
+    expect(gradePrompt(SAMPLE_SUITE.cases[4]!, [{ label: "A", text: "x" }], "quality")).toContain("QUALITY only");
   });
 
   it("runs profiles over cases, grades blind, and summarizes", async () => {
@@ -43,7 +43,7 @@ describe("bench", () => {
     expect(bad.avgAccuracy).toBe(0);
     expect(good.convergedRate).toBe(1);
     expect(good.failures).toBe(0);
-    expect(grader.calls).toHaveLength(2);
+    expect(grader.calls).toHaveLength(4); // quality + accuracy per case
     expect(grader.calls[0]!.phase).toBe("grade");
     const md = renderBench(report);
     expect(md).toContain("| good | 10.0/10 |");
@@ -65,7 +65,7 @@ describe("bench", () => {
     expect(report.results.map((r) => r.trial)).toEqual([0, 1, 2]);
     expect(report.summaries[0]!.cases).toBe(3);
     expect(report.summaries[0]!.avgAccuracy).toBe(10);
-    expect(grader.calls).toHaveLength(1);
+    expect(grader.calls).toHaveLength(2); // one quality + one accuracy call for the single case
     expect(renderBench(report)).toContain("(trial 2)");
   });
 

@@ -73,7 +73,7 @@ export async function probe(panelist, timeoutMs = 120_000) {
             system: "You are a connectivity check. Follow the instruction exactly.",
             messages: [{ role: "user", content: "Reply with exactly the two letters: OK" }],
             effort: "low",
-            maxTokens: 2000,
+            maxTokens: 8000, // reasoning models spend hidden tokens; a tiny cap can false-fail a healthy key
             signal: ac.signal,
             phase: "probe",
         });

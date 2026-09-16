@@ -63,7 +63,10 @@ export function eventToMarkdown(e: ConsensusEvent): string | undefined {
 
 /** One-line terminal summaries for --verbose. */
 export function eventToTerminal(e: ConsensusEvent): string[] {
-  const first = (t: string) => t.trim().split("\n")[0]!.slice(0, 110);
+  const first = (t: string) => {
+    const line = t.trim().split("\n")[0]!;
+    return line.length > 110 ? line.slice(0, 109).replace(/\s+\S*$/, "") + "…" : line;
+  };
   switch (e.type) {
     case "proposal":
       return [`  ${e.label} says: ${first(e.text)}…`];

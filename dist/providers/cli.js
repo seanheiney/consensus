@@ -11,8 +11,12 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-/** A single headless call is killed after this long unless the caller overrides it. */
-export const DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
+import { TransientError } from "../types.js";
+/** A single headless call is killed after this long unless the caller overrides it (see setDefaultTimeout / --timeout). */
+export let DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
+export function setDefaultTimeout(ms) {
+    DEFAULT_TIMEOUT_MS = ms;
+}
 export function runCommand(bin, args, opts = {}) {
     return new Promise((resolve, reject) => {
         // Spawn with the user's real shell environment only. Stored consensus
@@ -28,7 +32,11 @@ export function runCommand(bin, args, opts = {}) {
         child.stderr.on("data", (d) => (stderr += d));
         child.on("error", (err) => reject(new Error(`failed to start ${bin}: ${err.message}`)));
         child.on("close", (code) => resolve({ stdout, stderr, code }));
-        const kill = () => child.kill("SIGTERM");
+        // SIGTERM first; SIGKILL if the CLI ignores it for 10 s.
+        const kill = () => {
+            child.kill("SIGTERM");
+            setTimeout(() => child.kill("SIGKILL"), 10_000).unref();
+        };
         opts.signal?.addEventListener("abort", kill, { once: true });
         setTimeout(kill, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS).unref();
         child.stdin.on("error", () => { }); // EPIPE if the tool exits early
@@ -72,7 +80,7 @@ function pickText(obj) {
 // ---------------------------------------------------------------------------
 // Claude Code  (`claude -p`)  — Claude Pro/Max subscription or Console login
 // ---------------------------------------------------------------------------
-const CLAUDE_EFFORT = { low: "low", medium: "medium", high: "high", max: "max" };
+const CLAUDE_EFFORT = { low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" };
 export function createClaudeCliPanelist(opts = {}) {
     const bin = opts.bin ?? "claude";
     return {
@@ -98,17 +106,27 @@ export function createClaudeCliPanelist(opts = {}) {
             ];
             if (opts.model)
                 args.push("--model", opts.model);
+            if (req.jsonSchema)
+                args.push("--json-schema", JSON.stringify(req.jsonSchema));
             const res = await withTempDir((cwd) => runCommand(bin, args, { stdin: flattenMessages(req.messages), cwd, signal: req.signal, timeoutMs: opts.timeoutMs }));
             let parsed;
             try {
                 parsed = JSON.parse(res.stdout);
             }
             catch {
+                if (res.code === null || /SIGTERM|SIGKILL|timed out/i.test(res.stderr))
+                    throw new TransientError(`claude timed out or was killed (exit ${res.code})`);
                 throw new Error(`claude returned non-JSON (exit ${res.code}): ${tail(res.stderr || res.stdout)}`);
             }
-            if (parsed.is_error || typeof parsed.result !== "string") {
-                throw new Error(`claude error: ${typeof parsed.result === "string" ? parsed.result : tail(res.stderr)}`);
+            if (parsed.is_error || (typeof parsed.result !== "string" && parsed.structured_output === undefined)) {
+                const msg = typeof parsed.result === "string" ? parsed.result : tail(res.stderr);
+                if (/rate limit|overloaded|529|429/i.test(msg))
+                    throw new TransientError(`claude: ${msg}`);
+                throw new Error(`claude error: ${msg}`);
             }
+            // With --json-schema, Claude Code returns the validated object under structured_output.
+            if (req.jsonSchema && parsed.structured_output !== undefined)
+                parsed.result = JSON.stringify(parsed.structured_output);
             const u = parsed.usage;
             // Claude Code reports its own list-price cost (total_cost_usd); prefer it over re-deriving.
             const costUsd = typeof parsed.total_cost_usd === "number" ? parsed.total_cost_usd : undefined;
@@ -122,7 +140,7 @@ export function createClaudeCliPanelist(opts = {}) {
 // ---------------------------------------------------------------------------
 // Codex CLI  (`codex exec`)  — ChatGPT Plus/Pro subscription
 // ---------------------------------------------------------------------------
-const CODEX_EFFORT = { low: "low", medium: "medium", high: "high", max: "xhigh" };
+const CODEX_EFFORT = { low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "xhigh" };
 export function createCodexCliPanelist(opts = {}) {
     const bin = opts.bin ?? "codex";
     return {
@@ -156,6 +174,11 @@ export function createCodexCliPanelist(opts = {}) {
                 ];
                 if (opts.model)
                     args.push("-m", opts.model);
+                if (req.jsonSchema) {
+                    const schemaFile = join(cwd, "schema.json");
+                    await writeFile(schemaFile, JSON.stringify(req.jsonSchema));
+                    args.push("--output-schema", schemaFile);
+                }
                 args.push("-");
                 // Codex has no system-prompt flag; the instructions lead the prompt.
                 const stdin = `# Instructions\n\n${req.system}\n\n# Request\n\n${flattenMessages(req.messages)}`;
@@ -164,6 +187,8 @@ export function createCodexCliPanelist(opts = {}) {
                 if (!text.trim()) {
                     const err = res.stderr.match(/ERROR: (.*)/)?.[1] ?? res.stdout.match(/ERROR: (.*)/)?.[1];
                     const msg = err ? tail(err) : tail(res.stderr || res.stdout);
+                    if (res.code === null || /rate limit|429|overloaded|timed out|SIGTERM/i.test(msg))
+                        throw new TransientError(`codex: ${msg}`);
                     const hint = /newer version of Codex/i.test(msg)
                         ? " Fix: `npm install -g @openai/codex@latest`, or pick a model this Codex supports (e.g. codex:gpt-5.6-sol)."
                         : /not logged in|login/i.test(msg) ? " Fix: `codex login`." : "";
@@ -246,7 +271,7 @@ export function createGeminiCliPanelist(opts = {}) {
 // ---------------------------------------------------------------------------
 // Grok  (`grok -p`)  — X/SuperGrok login or XAI_API_KEY
 // ---------------------------------------------------------------------------
-const GROK_EFFORT = { low: "low", medium: "medium", high: "high", max: "high" };
+const GROK_EFFORT = { low: "low", medium: "medium", high: "high", xhigh: "high", max: "high" };
 export function createGrokCliPanelist(opts = {}) {
     const bin = opts.bin ?? "grok";
     return {

@@ -74,6 +74,8 @@ export class CostLimitError extends Error {
     spentUsd;
     limitUsd;
     phase;
+    /** The run so far (no synthesis), when the engine could capture it. */
+    partial;
     constructor(spentUsd, limitUsd, phase) {
         super(`Spend ceiling reached: ~$${spentUsd.toFixed(2)} billed to API keys after ${phase}, limit $${limitUsd.toFixed(2)} (--max-cost). Subscription seats are quota and are not counted.`);
         this.spentUsd = spentUsd;

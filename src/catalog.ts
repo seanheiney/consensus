@@ -58,7 +58,7 @@ export function priceLabel(m: CatalogModel): string {
 export interface Preset {
   name: string;
   description: string;
-  effort: "low" | "medium" | "high" | "max";
+  effort: "low" | "medium" | "high" | "xhigh" | "max";
   rounds: number;
   /**
    * "per-vendor": one model of `tier` from every connected vendor.
@@ -139,13 +139,13 @@ export function routeFor(
   return undefined;
 }
 
-export function specFor(vendor: CatalogVendor, model: CatalogModel, statuses: VendorStatus[], effort?: "low" | "medium" | "high" | "max"): string | undefined {
+export function specFor(vendor: CatalogVendor, model: CatalogModel, statuses: VendorStatus[], effort?: "low" | "medium" | "high" | "xhigh" | "max"): string | undefined {
   const r = routeFor(vendor, model, statuses);
   return r ? formatSpec({ provider: r.provider, model: r.model, effort }) : undefined;
 }
 
 /** Best model of the tier that can actually be seated here (skips e.g. gpt-6-astra on an old Codex). */
-export function pickSeatable(vendor: CatalogVendor, tier: Tier, statuses: VendorStatus[]): { model: CatalogModel; spec: (effort?: "low" | "medium" | "high" | "max") => string; substituted?: string } | undefined {
+export function pickSeatable(vendor: CatalogVendor, tier: Tier, statuses: VendorStatus[]): { model: CatalogModel; spec: (effort?: "low" | "medium" | "high" | "xhigh" | "max") => string; substituted?: string } | undefined {
   const order: Tier[] = tier === "frontier" ? ["frontier", "standard", "budget"] : tier === "standard" ? ["standard", "frontier", "budget"] : ["budget", "standard", "frontier"];
   const preferred = pickForTier(vendor, tier);
   for (const t of order) {

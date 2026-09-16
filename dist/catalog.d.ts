@@ -25,7 +25,7 @@ export declare function priceLabel(m: CatalogModel): string;
 export interface Preset {
     name: string;
     description: string;
-    effort: "low" | "medium" | "high" | "max";
+    effort: "low" | "medium" | "high" | "xhigh" | "max";
     rounds: number;
     /**
      * "per-vendor": one model of `tier` from every connected vendor.
@@ -56,11 +56,11 @@ export declare function routeFor(vendor: CatalogVendor, model: CatalogModel, sta
     model: string;
     viaOpenRouter: boolean;
 } | undefined;
-export declare function specFor(vendor: CatalogVendor, model: CatalogModel, statuses: VendorStatus[], effort?: "low" | "medium" | "high" | "max"): string | undefined;
+export declare function specFor(vendor: CatalogVendor, model: CatalogModel, statuses: VendorStatus[], effort?: "low" | "medium" | "high" | "xhigh" | "max"): string | undefined;
 /** Best model of the tier that can actually be seated here (skips e.g. gpt-6-astra on an old Codex). */
 export declare function pickSeatable(vendor: CatalogVendor, tier: Tier, statuses: VendorStatus[]): {
     model: CatalogModel;
-    spec: (effort?: "low" | "medium" | "high" | "max") => string;
+    spec: (effort?: "low" | "medium" | "high" | "xhigh" | "max") => string;
     substituted?: string;
 } | undefined;
 /** Look a catalog model up by its vendor id or OpenRouter id. */

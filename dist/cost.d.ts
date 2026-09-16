@@ -19,5 +19,7 @@ export declare class CostLimitError extends Error {
     readonly spentUsd: number;
     readonly limitUsd: number;
     readonly phase: string;
+    /** The run so far (no synthesis), when the engine could capture it. */
+    partial?: import("./types.js").ConsensusRun;
     constructor(spentUsd: number, limitUsd: number, phase: string);
 }

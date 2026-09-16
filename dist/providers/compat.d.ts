@@ -1,4 +1,4 @@
-import type { Panelist } from "../types.js";
+import { type Panelist } from "../types.js";
 import type { ProviderFactoryOptions } from "./types.js";
 export interface CompatOptions extends ProviderFactoryOptions {
     provider: string;

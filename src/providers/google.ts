@@ -23,7 +23,7 @@ export function createGooglePanelist(opts: ProviderFactoryOptions): Panelist {
           systemInstruction: req.system,
           maxOutputTokens: req.maxTokens ?? 32000,
           abortSignal: req.signal,
-          ...(req.json ? { responseMimeType: "application/json" } : {}),
+          ...(req.json ? { responseMimeType: "application/json", ...(req.jsonSchema ? { responseJsonSchema: req.jsonSchema } : {}) } : {}),
         },
       });
       const text = res.text ?? "";

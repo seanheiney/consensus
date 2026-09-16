@@ -93,50 +93,82 @@ const GradeSchema = z.object({
     grades: z.array(z.object({
         answer: z.string(),
         accuracy: z.number().min(0).max(10).nullable().default(null),
-        quality: z.number().min(0).max(10),
+        quality: z.number().min(0).max(10).nullable().default(null),
         notes: z.string().default(""),
     })),
 });
-export function gradePrompt(c, answers) {
+/**
+ * Grading is two-phase so the reference answer cannot leak into the subjective
+ * score: phase "quality" never sees the reference; phase "accuracy" does.
+ */
+export function gradePrompt(c, answers, phase = "accuracy") {
     const block = answers.map((a) => `### Answer ${a.label}\n\n${a.text.trim()}`).join("\n\n---\n\n");
-    return `You are grading answers to a problem. Be strict, consistent, and blind to style.
+    if (phase === "quality") {
+        return `You are grading answers to a problem for QUALITY only. Be strict, consistent, and blind to style. You are not told the correct answer; judge reasoning, completeness, specificity, honesty about limits, and absence of errors or padding.
 
 ## Problem
 
 ${c.prompt}
 ${c.context ? `\n### Context\n\n${c.context}\n` : ""}
-${c.expected ? `## Reference answer (ground truth)\n\n${c.expected}\n` : "## Reference answer\n\nNone: there is no single correct answer. Set accuracy to null.\n"}
-${c.rubric ? `## Rubric for quality\n\n${c.rubric}\n` : ""}
+${c.rubric ? `## Rubric\n\n${c.rubric}\n` : ""}
 ## Answers
 
 ${block}
 
 ## Scoring
 
-For each answer give:
-- accuracy (0-10, or null if there is no reference): 10 = fully correct and consistent with the reference; 0 = wrong conclusion. Partial credit only for partially correct conclusions, not for effort.
-- quality (0-10): correctness of reasoning, completeness against the rubric, specificity and actionability, honesty about limits, absence of errors or padding.
-- notes: one sentence on the decisive strengths or errors.
+For each answer give quality (0-10) and one sentence of notes.
 
-Respond with ONLY a JSON object: {"grades": [{"answer": "A", "accuracy": 8, "quality": 7, "notes": "..."}, ...]} with one entry per answer.`;
+Respond with ONLY a JSON object: {"grades": [{"answer": "A", "quality": 7, "notes": "..."}, ...]} with one entry per answer.`;
+    }
+    return `You are grading answers to a problem for ACCURACY against a reference. Be strict and consistent.
+
+## Problem
+
+${c.prompt}
+${c.context ? `\n### Context\n\n${c.context}\n` : ""}
+## Reference answer (ground truth)
+
+${c.expected}
+
+## Answers
+
+${block}
+
+## Scoring
+
+For each answer give accuracy (0-10): 10 = fully correct and consistent with the reference; 0 = wrong conclusion. Partial credit only for partially correct conclusions, not for effort.
+
+Respond with ONLY a JSON object: {"grades": [{"answer": "A", "accuracy": 8}, ...]} with one entry per answer.`;
 }
 export async function gradeCase(grader, c, answers) {
-    // Shuffle (Fisher-Yates) so the grader can't learn a profile order.
-    const order = shuffle(answers.map((a, i) => ({ ...a, i })));
-    const labeled = order.map((a, i) => ({ ...a, label: String.fromCharCode(65 + i) }));
-    const res = await grader.complete({
-        system: "You are a meticulous, impartial grader.",
-        messages: [{ role: "user", content: gradePrompt(c, labeled) }],
-        json: true,
-        effort: "high",
-        phase: "grade",
-    });
-    const parsed = GradeSchema.parse(extractJson(res.text));
+    // Shuffle (Fisher-Yates) so the grader can't learn a profile order; a fresh order per phase.
+    const ask = async (phase) => {
+        const labeled = shuffle(answers).map((a, i) => ({ ...a, label: String.fromCharCode(65 + i) }));
+        const res = await grader.complete({
+            system: "You are a meticulous, impartial grader.",
+            messages: [{ role: "user", content: gradePrompt(c, labeled, phase) }],
+            json: true,
+            effort: "high",
+            phase: "grade",
+        });
+        const parsed = GradeSchema.parse(extractJson(res.text));
+        const byKey = {};
+        for (const g of parsed.grades) {
+            const a = labeled.find((x) => x.label === g.answer);
+            if (a)
+                byKey[a.key] = { accuracy: g.accuracy, quality: g.quality, notes: g.notes };
+        }
+        return byKey;
+    };
+    const q = await ask("quality");
+    const acc = c.expected ? await ask("accuracy") : {};
     const out = {};
-    for (const g of parsed.grades) {
-        const a = labeled.find((x) => x.label === g.answer);
-        if (a)
-            out[a.key] = { accuracy: c.expected ? g.accuracy : null, quality: g.quality, notes: g.notes };
+    for (const a of answers) {
+        const qq = q[a.key];
+        if (!qq)
+            continue;
+        out[a.key] = { accuracy: c.expected ? (acc[a.key]?.accuracy ?? null) : null, quality: qq.quality ?? 0, notes: qq.notes };
     }
     return out;
 }

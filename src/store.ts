@@ -89,7 +89,7 @@ export function markdownToHtml(md: string): string {
     const h = raw.match(/^(#{1,6})\s+(.*)$/);
     if (h) { closeList(); closeTable(); out.push(`<h${h[1]!.length}>${inline(h[2]!)}</h${h[1]!.length}>`); continue; }
     if (/^\s*[-*]\s+/.test(raw)) { closeTable(); if (!inList) { out.push("<ul>"); inList = true; } out.push(`<li>${inline(raw.replace(/^\s*[-*]\s+/, ""))}</li>`); continue; }
-    if (/^\|.*\|\s*$/.test(raw)) { closeList(); if (/^\|[\s:|-]+\|\s*$/.test(raw)) continue; if (!inTable) { out.push("<table>"); inTable = true; } out.push("<tr>" + raw.slice(1, -1).split("|").map((c) => `<td>${inline(c.trim())}</td>`).join("") + "</tr>"); continue; }
+    if (/^\|.*\|\s*$/.test(raw)) { closeList(); if (/^\|[\s:|-]+\|\s*$/.test(raw)) continue; const first = !inTable; if (!inTable) { out.push("<table>"); inTable = true; } const tag = first ? "th" : "td"; out.push("<tr>" + raw.slice(1, -1).split("|").map((c) => `<${tag}>${inline(c.trim())}</${tag}>`).join("") + "</tr>"); continue; }
     if (raw.trim() === "---") { closeList(); closeTable(); out.push("<hr>"); continue; }
     if (raw.startsWith("<details") || raw.startsWith("</details") || raw.startsWith("<summary")) { out.push(raw); continue; }
     if (!raw.trim()) { closeList(); closeTable(); continue; }

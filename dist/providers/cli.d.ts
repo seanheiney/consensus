@@ -1,6 +1,7 @@
-import type { ChatMessage, Effort, Panelist } from "../types.js";
-/** A single headless call is killed after this long unless the caller overrides it. */
-export declare const DEFAULT_TIMEOUT_MS: number;
+import { type ChatMessage, type Effort, type Panelist } from "../types.js";
+/** A single headless call is killed after this long unless the caller overrides it (see setDefaultTimeout / --timeout). */
+export declare let DEFAULT_TIMEOUT_MS: number;
+export declare function setDefaultTimeout(ms: number): void;
 export interface RunResult {
     stdout: string;
     stderr: string;

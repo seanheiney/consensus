@@ -22,6 +22,7 @@ export declare const PackSchema: z.ZodObject<{
             low: "low";
             max: "max";
             medium: "medium";
+            xhigh: "xhigh";
         }>>;
         personas: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
         substitutions: z.ZodOptional<z.ZodArray<z.ZodString>>;

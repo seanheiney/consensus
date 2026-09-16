@@ -111,11 +111,13 @@ export function markdownToHtml(md) {
             closeList();
             if (/^\|[\s:|-]+\|\s*$/.test(raw))
                 continue;
+            const first = !inTable;
             if (!inTable) {
                 out.push("<table>");
                 inTable = true;
             }
-            out.push("<tr>" + raw.slice(1, -1).split("|").map((c) => `<td>${inline(c.trim())}</td>`).join("") + "</tr>");
+            const tag = first ? "th" : "td";
+            out.push("<tr>" + raw.slice(1, -1).split("|").map((c) => `<${tag}>${inline(c.trim())}</${tag}>`).join("") + "</tr>");
             continue;
         }
         if (raw.trim() === "---") {
