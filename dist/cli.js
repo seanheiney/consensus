@@ -28,6 +28,9 @@ import { eventToTerminal, openDebateLog } from "./debatelog.js";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { findReceipt, installKind, uninstallStandalone } from "./install-receipt.js";
+function kindLabel(kind) {
+    return kind === "npm" ? "npm package" : kind === "archive" ? "release archive (unpacked by hand)" : kind === "standalone" ? "standalone install" : "source checkout";
+}
 import { onPath } from "./providers/index.js";
 const require = createRequire(import.meta.url);
 const { version } = require("../package.json");
@@ -332,7 +335,7 @@ program
             log(dim(`  launcher ${inst.receipt.launcher}${onPath("consensus") ? "" : "  (not on this shell's PATH yet: open a new terminal)"}`));
     }
     else
-        log(dim(`  ${kind === "npm" ? "npm package" : "source checkout"} ${version}, Node ${process.versions.node} (${process.execPath})`));
+        log(dim(`  ${kindLabel(kind)} ${version}, Node ${process.versions.node} (${process.execPath})`));
     if (o.probe) {
         const specs = statuses.filter((s) => s.connected).map((s) => s.spec);
         log(bold("\nLive probe"));
@@ -900,6 +903,8 @@ program
         return log(`installed with npm; update with:\n  npm install -g consensus-panel${target ? `@${target.replace(/^v/, "")}` : "@latest"}`);
     if (kind === "source")
         return log("running from a source checkout; update with:\n  git pull && pnpm install && pnpm build");
+    if (kind === "archive")
+        return log("running from a release archive unpacked by hand; download the new one from https://github.com/seanheiney/consensus/releases, or install with the one-line installer to get `consensus update`.");
     const inst = findReceipt();
     const { spawnSync } = await import("node:child_process");
     const env = { ...process.env, CONSENSUS_ROOT: inst.root };

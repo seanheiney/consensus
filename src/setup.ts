@@ -53,7 +53,7 @@ export function setupSummary(i: SummaryInput): string {
     else if (rc.length) rows.push(["PATH", `new terminals: ok (${rc.join(", ")}); ${hint || `this one: source ${tilde(inst.receipt?.envFile ?? "~/.consensus/env")}`}`]);
     else rows.push(["PATH", hint || `not on PATH: add ${tilde(inst.receipt?.binDir ?? "~/.local/bin")} to PATH`]);
   } else {
-    rows.push(["Installed", `consensus ${version} (${kind === "npm" ? "npm package" : "source checkout"}, Node ${process.versions.node})`]);
+    rows.push(["Installed", `consensus ${version} (${kind === "npm" ? "npm package" : kind === "archive" ? "release archive" : "source checkout"}, Node ${process.versions.node})`]);
     rows.push(["PATH", onPathNow ? "consensus is on PATH" : "consensus is not on this shell's PATH"]);
   }
   rows.push(["Accounts", i.statuses.map((s) => `${s.connected ? G.ok : G.no} ${s.label}${s.connected ? (s.via === "cli" && s.cli ? ` via ${s.cli.name}` : " key") : ""}`).join("   ")]);

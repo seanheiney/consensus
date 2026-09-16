@@ -57,6 +57,8 @@ export function findReceipt(env = process.env) {
 export function installKind(env = process.env, selfPath = "") {
     if (runningRoot(env))
         return "standalone";
+    if (env.CONSENSUS_HOME)
+        return "archive"; // a release archive unpacked by hand, outside <root>/versions
     return /[\\/]node_modules[\\/]/.test(selfPath) ? "npm" : "source";
 }
 /**

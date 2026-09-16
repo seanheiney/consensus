@@ -12,7 +12,7 @@ export interface InstallReceipt {
     rcFiles: string[];
     installer?: string;
 }
-export type InstallKind = "standalone" | "npm" | "source";
+export type InstallKind = "standalone" | "archive" | "npm" | "source";
 /** Where the installers put versions: $CONSENSUS_ROOT, else ~/.consensus (%LOCALAPPDATA%\consensus on Windows). */
 export declare function defaultInstallRoot(env?: NodeJS.ProcessEnv): string;
 /** The install root this process was launched from, when it runs from <root>/versions/<version>. */

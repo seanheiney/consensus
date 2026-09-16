@@ -34,7 +34,7 @@ export interface InstallReceipt {
   installer?: string;
 }
 
-export type InstallKind = "standalone" | "npm" | "source";
+export type InstallKind = "standalone" | "archive" | "npm" | "source";
 
 const isWin = (): boolean => process.platform === "win32";
 
@@ -73,6 +73,7 @@ export function findReceipt(env: NodeJS.ProcessEnv = process.env): { root: strin
 
 export function installKind(env: NodeJS.ProcessEnv = process.env, selfPath = ""): InstallKind {
   if (runningRoot(env)) return "standalone";
+  if (env.CONSENSUS_HOME) return "archive"; // a release archive unpacked by hand, outside <root>/versions
   return /[\\/]node_modules[\\/]/.test(selfPath) ? "npm" : "source";
 }
 
