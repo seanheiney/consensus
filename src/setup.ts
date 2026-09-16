@@ -49,31 +49,35 @@ export function setupSummary(i: SummaryInput): string {
     if (inst.receipt?.launcher) rows.push(["Launcher", tilde(inst.receipt.launcher)]);
     const rc = (inst.receipt?.rcFiles ?? []).map(tilde);
     const hint = env.CONSENSUS_PATH_HINT;
-    if (onPathNow) rows.push(["PATH", `consensus is on PATH${rc.length ? ` (via ${rc.join(", ")})` : ""}`]);
-    else if (rc.length) rows.push(["PATH", `new terminals: ok (${rc.join(", ")}); ${hint || `this one: source ${tilde(inst.receipt?.envFile ?? "~/.consensus/env")}`}`]);
-    else rows.push(["PATH", hint || `not on PATH: add ${tilde(inst.receipt?.binDir ?? "~/.local/bin")} to PATH`]);
+    if (onPathNow) rows.push(["PATH", `on PATH${rc.length ? ` (${rc.join(", ")})` : ""}`]);
+    else if (rc.length) {
+      rows.push(["PATH", `new terminals: ${rc.join(", ")}`]);
+      rows.push(["This shell", (hint || `source ${tilde(inst.receipt?.envFile ?? "~/.consensus/env")}`).replace(/^this shell: /, "")]);
+    } else rows.push(["PATH", hint || `not on PATH: add ${tilde(inst.receipt?.binDir ?? "~/.local/bin")}`]);
   } else {
     rows.push(["Installed", `consensus ${version} (${kind === "npm" ? "npm package" : kind === "archive" ? "release archive" : "source checkout"}, Node ${process.versions.node})`]);
     rows.push(["PATH", onPathNow ? "consensus is on PATH" : "consensus is not on this shell's PATH"]);
   }
-  rows.push(["Accounts", i.statuses.map((s) => `${s.connected ? G.ok : G.no} ${s.label}${s.connected ? (s.via === "cli" && s.cli ? ` via ${s.cli.name}` : " key") : ""}`).join("   ")]);
+  const accounts = i.statuses.map((s) => `${s.connected ? G.ok : G.no} ${s.label}${s.connected ? (s.via === "cli" && s.cli ? ` via ${s.cli.name}` : " key") : ""}`);
+  rows.push(["Accounts", [0, 2, 4].map((k) => accounts.slice(k, k + 2).join("   ")).filter(Boolean).join("\n")]);
   const names = Object.keys(i.cfg.profiles ?? {});
-  rows.push(["Profiles", `${names.length ? names.map((n) => (n === i.cfg.profile ? `${n} (default)` : n)).join(", ") : "none"}   ${tilde(i.cfgPath)}`]);
+  rows.push(["Profiles", names.length ? names.map((n) => (n === i.cfg.profile ? `${n} (default)` : n)).join(", ") : "none yet"]);
+  rows.push(["Config", tilde(i.cfgPath)]);
   if (existsSync(credentialsPath())) rows.push(["Keys", `${tilde(credentialsPath())} (mode 600)`]);
   rows.push(["IDEs wired", i.wired.length ? i.wired.join(", ") : "none"]);
   if (i.wired.length) rows.push(["MCP command", i.mcpCommand.map((x) => tilde(x)).join(" ")]);
-  rows.push(["Telemetry", "none. Nothing is sent to any consensus-operated service; there isn't one."]);
+  rows.push(["Telemetry", "none (there is no consensus server to send anything to)"]);
   const width = Math.max(...rows.map(([k]) => k.length)) + 2;
-  const lines = rows.map(([k, v]) => `${k.padEnd(width)}${v}`);
+  const lines = rows.map(([k, v]) => `${k.padEnd(width)}${v.split("\n").join(`\n${" ".repeat(width)}`)}`);
   lines.push("");
   if (i.ready) {
-    lines.push(`Try:  consensus "Should we use optimistic locking or a distributed lock for inventory holds?"`);
-    lines.push("      consensus doctor        consensus --help        consensus uninstall --all");
+    lines.push(`Try:  consensus "Postgres SKIP LOCKED queue or Redis for our jobs?"`);
+    lines.push("      consensus doctor    consensus --help    consensus uninstall --all");
   } else {
     const n = i.statuses.filter((s) => s.connected).length;
     lines.push(`Not ready yet: ${n === 0 ? "no models connected" : `${n} model connected`}; a panel needs 2.`);
-    lines.push("Next: consensus connect openrouter   (one OpenRouter key seats every vendor)");
-    lines.push("  or: consensus connect <anthropic|openai|google|xai>, then consensus doctor");
+    lines.push("Next: consensus connect openrouter  (one key seats every vendor)");
+    lines.push("  or: consensus connect <vendor>, then consensus doctor");
   }
   return lines.join("\n");
 }
@@ -355,7 +359,7 @@ export async function runSetup(o: SetupOptions = {}): Promise<void> {
   p.note(setupSummary({ statuses, cfg, cfgPath, wired, mcpCommand: cmd, ready: reachable >= 2 }), reachable >= 2 ? "You're set up" : "Installed, not ready yet");
   if (reachable >= 2) p.outro(`Done.${cfg.profile ? ` Default profile: ${cfg.profile}.` : ""}`);
   else {
-    p.outro("Connect one more model, then ask your first question.");
+    p.outro(`Connect ${connected.length === 0 ? "two models" : "one more model"}, then ask your first question.`);
     if (o.yes) process.exitCode = 3;
   }
 }
