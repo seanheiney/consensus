@@ -16,7 +16,7 @@ import { extractJson } from "./json.js";
 import { CritiqueSchema, RevisionSchema } from "./schemas.js";
 import { SYSTEM_PROMPT, critiquePrompt, proposePrompt, revisePrompt, synthesizePrompt } from "./prompts.js";
 import { z, type ZodType } from "zod";
-import { CostLimitError, estimateCost } from "../cost.js";
+import { CostLimitError, describeCost, estimateCost } from "../cost.js";
 
 const TRANSIENT = /429|rate.?limit|overloaded|529|503|timeout|timed out|ECONNRESET|EPIPE|temporar|try again|SIGTERM/i;
 
@@ -258,6 +258,8 @@ export class ConsensusEngine {
     this.emit({ type: "synthesis", panelist: synthesizer.panelist.id, text: run.synthesis });
 
     for (const s of states) if (s.usage.reported) run.usage[s.panelist.id] = { ...s.usage, reported: undefined };
+    const c = estimateCost(run.usage);
+    run.cost = { billedUsd: c.usd, subscriptionEquivUsd: c.subscriptionEquivUsd, unpriced: c.unpriced, summary: describeCost(c) };
     run.finishedAt = new Date().toISOString();
     this.emit({ type: "done", run });
     return run;

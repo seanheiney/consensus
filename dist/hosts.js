@@ -30,6 +30,15 @@ async function rmSkill(dir) {
     if (!existsSync(dir))
         return undefined;
     await rm(dir, { recursive: true, force: true });
+    // Drop the now-empty skills folder too, so uninstall leaves no trace.
+    try {
+        const { readdir, rmdir } = await import("node:fs/promises");
+        if ((await readdir(dirname(dir))).length === 0)
+            await rmdir(dirname(dir));
+    }
+    catch {
+        /* keep */
+    }
     return `removed ${dir}`;
 }
 async function viaCliRemove(bin, args) {

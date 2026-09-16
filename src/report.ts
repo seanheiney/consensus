@@ -23,6 +23,7 @@ export function renderReport(run: ConsensusRun, opts: { transcript?: boolean } =
     `_Panel ${status}. Panelists: ${panel}. Synthesized by ${run.judge}${judgeOnPanel ? " (a panelist; pass --judge external:<spec> for a judge that did not debate)" : " (external judge, did not debate)"}. Run ${run.id}._`,
     "",
     `_"Converged" means every seat accepted every other seat's answer as substantively equivalent: self-reported agreement, not verified correctness. Confidence is the judge's own estimate._`,
+    ...(run.cost ? ["", `_Cost: ${run.cost.summary}._`] : []),
   ];
 
   if (Object.keys(run.dropped).length) {

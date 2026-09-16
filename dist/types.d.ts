@@ -127,6 +127,13 @@ export interface ConsensusRun {
     judge: string;
     synthesis: string;
     usage: Record<string, Usage>;
+    /** Cost summary computed at the end of the run (billed vs subscription-equivalent). */
+    cost?: {
+        billedUsd: number | null;
+        subscriptionEquivUsd: number | null;
+        unpriced: string[];
+        summary: string;
+    };
     dropped: Record<string, string>;
 }
 export type ConsensusEvent = {

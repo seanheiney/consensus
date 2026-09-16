@@ -499,3 +499,7 @@ Cost lines separate what API keys will bill from what subscription seats consume
 ## Hosts the installer wires up
 
 Claude Code, Codex CLI, Gemini CLI, Grok CLI, Cursor, Windsurf, Claude Desktop, VS Code (Copilot agent mode, user-level `mcp.json`), Zed (`context_servers`), and the cross-tool `~/.agents/skills` directory read by Copilot and others. `consensus doctor` shows, per host, whether the MCP server is registered and the skill installed; `consensus uninstall` reverses all of it.
+
+> `#xhigh` is a valid effort rung on every flag and spec that accepts effort. `consensus runs` prints to stdout (pipe-friendly); `consensus log --answer` prints only the `# Answer` section. Every report and `run.json` carries the run's cost summary (`cost.summary`).
+
+> `#xhigh` is a valid effort rung on every flag and spec that accepts effort. `consensus runs` prints to stdout (pipe-friendly); `consensus log --answer` prints only the `# Answer` section. Every report and `run.json` carries the run's cost summary (`cost.summary`). `consensus persona prune` removes custom personas no profile uses.

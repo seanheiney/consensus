@@ -38,7 +38,9 @@ Preferred: the MCP tool \`consensus\` (server name \`consensus\`). Arguments:
 - \`context\` (optional): the code, schema, constraints, error output, or prior attempts the panel needs. Paste it; do not describe it. Strip secrets.
 - \`profile\` (optional): a named model profile, e.g. \`frontier\`, \`balanced\`, \`budget\`, \`perspectives\` (one model seated under several personas). Omit for the user's default; \`consensus_profiles\` lists them.
 - \`panel\` (optional): explicit seats like \`["claude+skeptic", "codex:gpt-5.6-sol", "claude+security"]\` when the user asks for particular models or perspectives.
-- \`rounds\` (optional, default 3) and \`effort\` (optional, low|medium|high|max).
+- \`rounds\` (optional, default 3) and \`effort\` (optional, low|medium|high|xhigh|max).
+
+Two companion tools: \`consensus_design\` turns a plain-English brief ("4 panelists: security, distributed systems, a PM, a skeptic; frontier models") into a saved profile with personas and returns its name; \`consensus_profiles\` lists profiles and which vendors are connected (call it first if unsure). Runs take 1-4 minutes for small panels and 10+ for frontier profiles with 3 rounds; if your MCP client supports it, pass \`_meta.progressToken\` on the call to receive progress notifications (phase, seat done, converged) instead of silence.
 
 Fallback if the MCP tool is not available: run the CLI and read stdout.
 

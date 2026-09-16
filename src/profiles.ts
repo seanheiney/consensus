@@ -257,6 +257,22 @@ export function memberLabel(m: Member): string {
   return `${m.model}+${m.name ?? (m.persona && m.persona.length <= 40 && !/\s/.test(m.persona) ? m.persona : "custom")}`;
 }
 
+/** Problems a profile would hit at run time that are visible statically (unknown personas). */
+export function profileWarnings(prof: Profile, library: Record<string, string>): string[] {
+  const out: string[] = [];
+  const check = (ref: string | undefined) => {
+    if (!ref) return;
+    for (const raw of ref.split(",")) {
+      const name = raw.trim().replace(/-\d+$/, "");
+      if (!name || name.length > 40 || /\s/.test(name)) continue; // empty or inline text
+      if (!PERSONAS[name] && !library[name]) out.push(`persona "${name}" is not defined (consensus personas; persona add ${name} "...")`);
+    }
+  };
+  for (const m of prof.panel) check(typeof m === "string" ? splitMember(m).persona : m.persona && (m.persona.length > 40 || /\s/.test(m.persona)) ? undefined : m.persona);
+  if (prof.judge) check(splitMember(prof.judge.replace(/^external:/, "")).persona);
+  return out;
+}
+
 export function describeProfile(name: string, prof: Profile, active: boolean): string {
   const head = `${active ? "* " : "  "}${name}${prof.description ? `  — ${prof.description}` : ""}`;
   const body = prof.panel.map((s) => `      ${memberLabel(s)}`).join("\n");

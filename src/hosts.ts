@@ -43,6 +43,13 @@ async function removeMcpJson(file: string): Promise<string | undefined> {
 async function rmSkill(dir: string): Promise<string | undefined> {
   if (!existsSync(dir)) return undefined;
   await rm(dir, { recursive: true, force: true });
+  // Drop the now-empty skills folder too, so uninstall leaves no trace.
+  try {
+    const { readdir, rmdir } = await import("node:fs/promises");
+    if ((await readdir(dirname(dir))).length === 0) await rmdir(dirname(dir));
+  } catch {
+    /* keep */
+  }
   return `removed ${dir}`;
 }
 

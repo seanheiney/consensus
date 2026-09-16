@@ -136,5 +136,9 @@ export function materializeDesign(d: Design, statuses: VendorStatus[]): Material
     rounds: d.rounds,
     judge: d.judge === "external" ? "external:auto" : panel[0]?.replace(/#\w+(?=\+|$)/, ""),
   };
+  const distinctModels = new Set(panel.map((m) => m.split("+")[0]!.replace(/#\w+$/, "")));
+  if (panel.length > 1 && vendors.length < panel.length && distinctModels.size < panel.length) {
+    unseated.push(`note: only ${vendors.length} vendor(s) connected, so ${panel.length} seats share ${distinctModels.size} model(s); the personas still differ. Connect more vendors or add an OpenRouter key for a more diverse panel (consensus doctor).`);
+  }
   return { name: d.name, profile, personas, seatsExplained, unseated };
 }

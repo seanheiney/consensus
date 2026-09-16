@@ -89,6 +89,7 @@ export interface CaseResult {
   rounds: number;
   usage: Usage;
   costUsd: number | null;
+  subscriptionUsd?: number | null;
   unpriced: string[];
   dropped: string[];
   answer: string;
@@ -107,6 +108,8 @@ export interface ProfileSummary {
   totalIn: number;
   totalOut: number;
   totalCostUsd: number | null;
+  /** List-price equivalent consumed by subscription seats (quota, not billed). */
+  totalSubscriptionUsd: number | null;
   avgAccuracy: number | null;
   avgQuality: number | null;
 }
@@ -285,7 +288,7 @@ async function runOne(target: BenchProfileTarget, c: BenchCase, o: BenchOptions,
       const res = await target.single.complete({ system: "You are a careful expert. Answer the question completely and give your reasoning.", messages: [{ role: "user", content: plain }], effort: target.effort, phase: "propose" });
       const usage = res.usage ?? { inputTokens: 0, outputTokens: 0 };
       const cost = estimateCost({ [target.single.id]: usage });
-      return { ...base, ok: true, ms: Date.now() - t0, converged: false, rounds: 0, usage, costUsd: cost.usd, unpriced: cost.unpriced, dropped: [], answer: res.text };
+      return { ...base, ok: true, ms: Date.now() - t0, converged: false, rounds: 0, usage, costUsd: cost.usd, subscriptionUsd: cost.subscriptionEquivUsd, unpriced: cost.unpriced, dropped: [], answer: res.text };
     }
     const engine = new ConsensusEngine({
       panel: target.panel,
@@ -302,7 +305,7 @@ async function runOne(target: BenchProfileTarget, c: BenchCase, o: BenchOptions,
       await mkdir(dir, { recursive: true });
       await writeFile(join(dir, `${c.id}${trial ? `.${trial + 1}` : ""}.json`), JSON.stringify(run, null, 2));
     }
-    return { ...base, ok: true, ms: Date.now() - t0, converged: run.converged, rounds: run.rounds.length, usage, costUsd: cost.usd, unpriced: cost.unpriced, dropped: Object.keys(run.dropped), answer: run.synthesis, runId: run.id };
+    return { ...base, ok: true, ms: Date.now() - t0, converged: run.converged, rounds: run.rounds.length, usage, costUsd: cost.usd, subscriptionUsd: cost.subscriptionEquivUsd, unpriced: cost.unpriced, dropped: Object.keys(run.dropped), answer: run.synthesis, runId: run.id };
   } catch (err) {
     return { ...base, ms: Date.now() - t0, error: (err as Error).message.split("\n")[0]!.slice(0, 300) };
   }
@@ -376,6 +379,7 @@ export function summarize(profile: string, rs: CaseResult[]): ProfileSummary {
     totalIn: ok.reduce((a, r) => a + r.usage.inputTokens, 0),
     totalOut: ok.reduce((a, r) => a + r.usage.outputTokens, 0),
     totalCostUsd: costs.some((c) => c !== null) ? costs.reduce<number>((a, c) => a + (c ?? 0), 0) : null,
+    totalSubscriptionUsd: ok.some((r) => r.subscriptionUsd != null) ? ok.reduce<number>((a, r) => a + (r.subscriptionUsd ?? 0), 0) : null,
     avgAccuracy: avg(ok.map((r) => r.accuracy)),
     avgQuality: avg(ok.map((r) => r.quality)),
   };
@@ -392,19 +396,19 @@ export function renderBench(r: BenchReport): string {
     ...(r.graderOverlap?.length ? ["", `**Grader bias warning:** the grader shares a model vendor with: ${r.graderOverlap.join(", ")}. LLM judges favour their own family; re-run with a grader from another vendor before trusting gaps involving these arms.`] : []),
     ...(r.summaries.some((s) => s.profile.startsWith("single:")) ? ["", "_Arms named `single:<model>` are baselines: one model answering once with no debate._"] : []),
     "",
-    "| Arm | Accuracy | Quality | Converged | Avg time | Tokens in / out | Est. cost | Failures |",
-    "|---|---:|---:|---:|---:|---:|---:|---:|",
+    "| Arm | Accuracy | Quality | Converged | Avg time | Tokens in / out | Billed (API) | Subscription equiv. | Failures |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
   ];
   for (const s of r.summaries) {
     const conv = s.profile.startsWith("single:") ? "n/a" : `${Math.round(s.convergedRate * 100)}%`;
-    lines.push(`| ${s.profile} | ${f1(s.avgAccuracy, "/10")} | ${f1(s.avgQuality, "/10")} | ${conv} | ${(s.avgMs / 1000).toFixed(0)}s | ${s.totalIn.toLocaleString("en-US")} / ${s.totalOut.toLocaleString("en-US")} | ${usd(s.totalCostUsd)} | ${s.failures} |`);
+    lines.push(`| ${s.profile} | ${f1(s.avgAccuracy, "/10")} | ${f1(s.avgQuality, "/10")} | ${conv} | ${(s.avgMs / 1000).toFixed(0)}s | ${s.totalIn.toLocaleString("en-US")} / ${s.totalOut.toLocaleString("en-US")} | ${usd(s.totalCostUsd)} | ${usd(s.totalSubscriptionUsd)} | ${s.failures} |`);
   }
-  lines.push("", "## Per case", "", "| Case | Profile | Accuracy | Quality | Converged | Rounds | Time | Est. cost | Notes |", "|---|---|---:|---:|---:|---:|---:|---:|---|");
+  lines.push("", "## Per case", "", "_Notes come from the blind grader, which sees every arm's answer for a case relabelled A, B, C…; those letters are the grader's, not the debate's seat labels._", "", "| Case | Arm | Accuracy | Quality | Converged | Rounds | Time | Billed | Sub. equiv. | Notes |", "|---|---|---:|---:|---:|---:|---:|---:|---:|---|");
   for (const x of r.results) {
     lines.push(
       x.ok
-        ? `| ${x.caseId}${x.trial ? ` (trial ${x.trial + 1})` : ""} | ${x.profile} | ${f1(x.accuracy)} | ${f1(x.quality)} | ${x.converged ? "yes" : "no"} | ${x.rounds} | ${(x.ms / 1000).toFixed(0)}s | ${usd(x.costUsd)} | ${(x.notes ?? "").replace(/\|/g, "/")}${x.dropped.length ? ` (dropped: ${x.dropped.join(", ")})` : ""} |`
-        : `| ${x.caseId}${x.trial ? ` (trial ${x.trial + 1})` : ""} | ${x.profile} | — | — | — | — | ${(x.ms / 1000).toFixed(0)}s | — | FAILED: ${(x.error ?? "").replace(/\|/g, "/")} |`,
+        ? `| ${x.caseId}${x.trial ? ` (trial ${x.trial + 1})` : ""} | ${x.profile} | ${f1(x.accuracy)} | ${f1(x.quality)} | ${x.profile.startsWith("single:") ? "n/a" : x.converged ? "yes" : "no"} | ${x.rounds} | ${(x.ms / 1000).toFixed(0)}s | ${usd(x.costUsd)} | ${usd(x.subscriptionUsd ?? null)} | ${(x.notes ?? "").replace(/\|/g, "/")}${x.dropped.length ? ` (dropped: ${x.dropped.join(", ")})` : ""} |`
+        : `| ${x.caseId}${x.trial ? ` (trial ${x.trial + 1})` : ""} | ${x.profile} | — | — | — | — | ${(x.ms / 1000).toFixed(0)}s | — | — | FAILED: ${(x.error ?? "").replace(/\|/g, "/")} |`,
     );
   }
   const unpriced = [...new Set(r.results.flatMap((x) => x.unpriced))];

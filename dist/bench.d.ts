@@ -42,6 +42,7 @@ export interface CaseResult {
     rounds: number;
     usage: Usage;
     costUsd: number | null;
+    subscriptionUsd?: number | null;
     unpriced: string[];
     dropped: string[];
     answer: string;
@@ -59,6 +60,8 @@ export interface ProfileSummary {
     totalIn: number;
     totalOut: number;
     totalCostUsd: number | null;
+    /** List-price equivalent consumed by subscription seats (quota, not billed). */
+    totalSubscriptionUsd: number | null;
     avgAccuracy: number | null;
     avgQuality: number | null;
 }

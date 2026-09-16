@@ -7,17 +7,17 @@ import { CATALOG, CATALOG_VENDORS, directRouteBlocker, priceLabel, routeFor } fr
 import { loadConfig, loadUserConfig, resolveRun, saveUserConfig } from "./config.js";
 import { credentialEnv, loadCredentials } from "./credentials.js";
 import { createPack, describePack, diffPack, installPack, readPack, removePack } from "./packs.js";
-import { configWarnings } from "./config.js";
+import { configWarnings, splitMember } from "./config.js";
 import { ensureGitignore } from "./hosts.js";
 import { CostLimitError, describeCost, estimateCost } from "./cost.js";
 import { setDefaultTimeout } from "./providers/cli.js";
 import { probeSpecs, scanVendors } from "./doctor.js";
 import { installProjectMcp, installProjectSkills, listHosts, mcpLaunchCommand } from "./hosts.js";
-import { describeProfile, editProfile, materializePreset, memberLabel } from "./profiles.js";
+import { describeProfile, editProfile, materializePreset, memberLabel, profileWarnings } from "./profiles.js";
 import { PRESETS } from "./catalog.js";
 import { PROVIDERS, VENDORS, createPanelist } from "./providers/index.js";
 import { PERSONAS } from "./personas.js";
-import { SAMPLE_SUITE, loadSuite, renderBench, runBench } from "./bench.js";
+import { SAMPLE_SUITE, answerSection, loadSuite, renderBench, runBench } from "./bench.js";
 import { CATALOG_VENDORS as _CV, pickForTier, routeFor as _routeFor } from "./catalog.js";
 import { scanVendors as _scan } from "./doctor.js";
 import { ConsensusEngine } from "./protocol/engine.js";
@@ -41,6 +41,15 @@ import { G, bold, dim, green, log, progressLogger, red, yellow } from "./progres
 import { preflight } from "./doctor.js";
 import { renderRunHtml } from "./store.js";
 import { materializePreset as _mp } from "./profiles.js";
+function levenshtein(a, b) {
+    const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+    for (let j = 1; j <= b.length; j++)
+        dp[0][j] = j;
+    for (let i = 1; i <= a.length; i++)
+        for (let j = 1; j <= b.length; j++)
+            dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    return dp[a.length][b.length];
+}
 function parseIntArg(v) {
     const n = Number.parseInt(v, 10);
     if (!Number.isFinite(n) || n < 1)
@@ -99,7 +108,10 @@ program
     const cfg = await loadConfig();
     // A bare single word is almost always a mistyped subcommand, and a run costs money.
     if (promptArg && promptArg !== "-" && !o.file && !/\s/.test(promptArg) && promptArg.length < 40 && process.argv[2] !== "run") {
-        throw new Error(`"${promptArg}" looks like a command, not a question, and a run spends money. Use \`consensus run "${promptArg}"\` if you meant it, or \`consensus --help\`.`);
+        const names = program.commands.map((c) => c.name());
+        const guess = names.map((n) => [n, levenshtein(promptArg.toLowerCase(), n)]).sort((x, y) => x[1] - y[1])[0];
+        const hint = guess && guess[1] <= 2 ? ` Did you mean \`consensus ${guess[0]}\`?` : "";
+        throw new Error(`"${promptArg}" looks like a command, not a question, and a run spends money.${hint} Use \`consensus run "${promptArg}"\` if you meant it, or \`consensus --help\`.`);
     }
     const prompt = (await readPrompt(promptArg, o.file)).trim();
     if (!prompt)
@@ -225,8 +237,7 @@ program
     if (!runs.length)
         return log(dim("no saved runs here"));
     for (const r of runs.slice(0, o.n ?? 20)) {
-        log(`${r.id}  ${r.converged ? green("converged") : yellow("open")} ${r.rounds}r  ${dim(r.panel.join(", "))}`);
-        log(`  ${r.prompt.replace(/\s+/g, " ").slice(0, 100)}`);
+        process.stdout.write(`${r.id}  ${r.converged ? "converged" : "open"} ${r.rounds}r  ${r.panel.join(", ")}\n  ${r.prompt.replace(/\s+/g, " ").slice(0, 100)}\n`);
     }
 });
 program
@@ -247,7 +258,7 @@ program
     if (o.json)
         return void process.stdout.write(JSON.stringify(run, null, 2) + "\n");
     if (o.answer)
-        return void process.stdout.write(run.synthesis + "\n");
+        return void process.stdout.write(answerSection(run.synthesis) + "\n");
     process.stdout.write(renderReport(run, { transcript: true }) + "\n");
     log(dim(`(${dir})`));
 });
@@ -319,8 +330,11 @@ program
     const names = Object.keys(cfg.profiles ?? {});
     if (!names.length)
         return log(dim("No profiles. Run `consensus setup` or `consensus profile create`."));
-    for (const n of names)
+    for (const n of names) {
         log(describeProfile(n, cfg.profiles[n], n === cfg.profile));
+        for (const w of profileWarnings(cfg.profiles[n], cfg.personas ?? {}))
+            log(yellow(`      warning: ${w}`));
+    }
 });
 const profile = program.command("profile").description("create, edit, switch, or delete model profiles");
 profile
@@ -350,10 +364,11 @@ profile
     const cfg = await loadUserConfig();
     const statuses = await scanVendors(credentialEnv());
     let r;
-    if (name && cfg.profiles?.[name] && !o.edit && !o.force) {
+    const target = name ?? o.preset;
+    if (target && cfg.profiles?.[target] && !o.edit && !o.force) {
         if (!process.stdin.isTTY)
-            throw new Error(`Profile "${name}" already exists. Pass --force to overwrite it (no terminal to ask).`);
-        const ok = await p.confirm({ message: `Profile "${name}" already exists. Overwrite it?`, initialValue: false });
+            throw new Error(`Profile "${target}" already exists. Pass --force to overwrite it (no terminal to ask).`);
+        const ok = await p.confirm({ message: `Profile "${target}" already exists. Overwrite it?`, initialValue: false });
         if (p.isCancel(ok) || !ok)
             return log("left unchanged");
     }
@@ -505,8 +520,8 @@ profile
         for (const [n, t] of Object.entries(built.personas))
             log(`  ${n}: ${dim(t)}`);
     }
-    if (built.unseated.length)
-        log(yellow(`\nnot seated: ${built.unseated.join("; ")}`));
+    for (const u of built.unseated)
+        log(yellow(u.startsWith("note:") ? `\n${u}` : `\nnot seated: ${u}`));
     if (design.rationale)
         log(dim(`\n${design.rationale}`));
     if (built.profile.panel.length < 2)
@@ -561,6 +576,8 @@ profile
     if (!prof)
         throw new Error(`No profile "${name}"`);
     log(describeProfile(name, prof, name === cfg.profile));
+    for (const w of profileWarnings(prof, cfg.personas ?? {}))
+        log(yellow(`      warning: ${w}`));
 });
 // ---- install -------------------------------------------------------------
 program
@@ -616,6 +633,41 @@ personaCmd
     cfg.personas = { ...cfg.personas, [name]: body.trim() };
     await saveUserConfig(cfg);
     log(`${existed ? "updated" : "added"} persona ${name}${PERSONAS[name] ? " (overrides the built-in of the same name)" : ""}. Use it as spec+${name}, e.g. claude+${name}.`);
+});
+personaCmd
+    .command("prune")
+    .description("delete custom personas that no profile references (designer runs leave some behind)")
+    .option("-y, --yes", "delete without listing first")
+    .action(async (o) => {
+    const cfg = await loadUserConfig();
+    const used = new Set();
+    for (const prof of Object.values(cfg.profiles ?? {})) {
+        for (const m of prof.panel) {
+            const { persona } = splitMember(m);
+            if (persona)
+                for (const x of persona.split(","))
+                    used.add(x.trim().replace(/-\d+$/, ""));
+        }
+        const j = prof.judge ? splitMember(prof.judge.replace(/^external:/, "")).persona : undefined;
+        if (j)
+            for (const x of j.split(","))
+                used.add(x.trim());
+    }
+    const unused = Object.keys(cfg.personas ?? {}).filter((n) => !used.has(n));
+    if (!unused.length)
+        return log("nothing to prune: every custom persona is referenced by a profile");
+    log(`unreferenced personas: ${unused.join(", ")}`);
+    if (!o.yes) {
+        if (!process.stdin.isTTY)
+            throw new Error("Pass --yes to prune without confirmation.");
+        const ok = await p.confirm({ message: `Delete ${unused.length} persona(s)?`, initialValue: true });
+        if (p.isCancel(ok) || !ok)
+            return log("kept");
+    }
+    for (const n of unused)
+        delete cfg.personas[n];
+    await saveUserConfig(cfg);
+    log(`pruned ${unused.length} persona(s)`);
 });
 personaCmd
     .command("remove")
@@ -694,7 +746,9 @@ bench
     }
     const grader = createPanelist(graderSpec, { effort: "high", env: credentialEnv() });
     const outDir = o.out ?? join(cfg.runsDir ? join(cfg.runsDir, "..", "bench") : ".consensus/bench", new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z"));
-    log(dim(`profiles: ${names.join(", ")}  cases: ${suite.cases.map((c) => c.id).join(", ")}  grader: ${grader.id}`));
+    const calls = targets.reduce((n, t) => n + (t.single ? 1 : t.panel.length * (1 + 2 * t.rounds) + 1), 0) * suite.cases.length * Math.max(1, o.trials ?? 1);
+    log(dim(`arms: ${targets.map((t) => t.name).join(", ")}  cases: ${suite.cases.map((c) => c.id).join(", ")}  grader: ${grader.id}`));
+    log(dim(`up to ~${calls} model calls across ${targets.length} arm(s); expect minutes to tens of minutes${o.parallel ? "" : " (add --parallel to run arms concurrently)"}`));
     log(dim(`output: ${outDir}`));
     const report = await runBench({
         suite,
@@ -724,7 +778,11 @@ bench
 bench
     .command("init")
     .description("write the starter suite to consensus.bench.json so you can edit or extend it")
-    .action(async () => {
+    .option("--force", "overwrite an existing consensus.bench.json")
+    .action(async (o) => {
+    const { existsSync } = await import("node:fs");
+    if (existsSync("consensus.bench.json") && !o.force)
+        throw new Error("consensus.bench.json already exists; pass --force to overwrite it.");
     await writeFile("consensus.bench.json", JSON.stringify(SAMPLE_SUITE, null, 2) + "\n");
     log("wrote consensus.bench.json (add your own cases: prompt, optional context, expected for objective ones, rubric for judgment ones)");
 });
@@ -811,7 +869,8 @@ pack
     const bundled = new URL(`../packs/${source}.json`, import.meta.url);
     const fs = await import("node:fs");
     const resolved = /^[a-z0-9-]+$/.test(source) && fs.existsSync(bundled) ? (await import("node:url")).fileURLToPath(bundled) : source;
-    if (!/^https?:\/\//.test(resolved) && !/^[\w.-]+\/[\w.-]+/.test(resolved) && !fs.existsSync(resolved)) {
+    const looksLikeRepo = /^[A-Za-z0-9_-][\w.-]*\/[\w.-]+/.test(resolved) && !resolved.startsWith(".") && !resolved.startsWith("/") && !fs.existsSync(resolved);
+    if (!/^https?:\/\//.test(resolved) && !looksLikeRepo && !fs.existsSync(resolved)) {
         throw new Error(`No pack at "${source}". Give a file path, a URL, owner/repo, or one of the shipped packs (consensus pack list).`);
     }
     const { pack: pk, from } = await readPack(resolved);

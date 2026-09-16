@@ -11,4 +11,6 @@ export declare function editProfile(statuses: VendorStatus[], existing?: Profile
     profile: Profile;
 }>;
 export declare function memberLabel(m: Member): string;
+/** Problems a profile would hit at run time that are visible statically (unknown personas). */
+export declare function profileWarnings(prof: Profile, library: Record<string, string>): string[];
 export declare function describeProfile(name: string, prof: Profile, active: boolean): string;

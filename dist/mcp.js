@@ -141,7 +141,9 @@ export function createMcpServer() {
         cfg.personas = { ...cfg.personas, ...built.personas };
         cfg.profiles = { ...cfg.profiles, [profileName]: built.profile };
         await saveUserConfig(cfg);
-        return { content: [{ type: "text", text: `Saved profile "${profileName}" (${design.description}).\nSeats:\n${built.seatsExplained.map((s) => `- ${s}`).join("\n")}\nJudge: ${built.profile.judge}; rounds: ${built.profile.rounds}.${built.unseated.length ? `\nNot seated: ${built.unseated.join("; ")}` : ""}\n${design.rationale}\nUse it: call consensus with profile="${profileName}".` }] };
+        const notes = built.unseated.filter((u) => u.startsWith("note:"));
+        const missing = built.unseated.filter((u) => !u.startsWith("note:"));
+        return { content: [{ type: "text", text: `Saved profile "${profileName}" (${design.description}).\nSeats:\n${built.seatsExplained.map((s) => `- ${s}`).join("\n")}\nJudge: ${built.profile.judge}; rounds: ${built.profile.rounds}.${missing.length ? `\nNot seated: ${missing.join("; ")}` : ""}${notes.length ? `\n${notes.join("\n")} (see consensus_profiles for connections)` : ""}\n${design.rationale}\nUse it: call consensus with profile="${profileName}".` }] };
     });
     server.registerTool("consensus_profiles", {
         title: "List consensus profiles and connections",
