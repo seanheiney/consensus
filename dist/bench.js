@@ -270,15 +270,22 @@ export async function runBench(o) {
     const startedAt = new Date().toISOString();
     const results = [];
     const trials = Math.max(1, o.trials ?? 1);
+    const names = new Set(o.profiles.map((t) => t.name));
+    const caseIds = new Set(o.suite.cases.map((c) => c.id));
+    const kept = (o.previous ?? []).filter((r) => r.ok && names.has(r.profile) && caseIds.has(r.caseId));
+    const done = new Set(kept.map((r) => `${r.profile}|${r.caseId}|${r.trial}`));
+    results.push(...kept.map((r) => ({ ...r, accuracy: null, quality: null, notes: "" })));
     const runProfile = async (target) => {
-        for (const c of o.suite.cases) {
-            for (let t = 0; t < trials; t++) {
-                o.onEvent?.({ type: "case:start", profile: target.name, caseId: c.id });
-                const r = await runOne(target, c, o, t);
+        const jobs = o.suite.cases.flatMap((c) => Array.from({ length: trials }, (_, t) => ({ c, t }))).filter(({ c, t }) => !done.has(`${target.name}|${c.id}|${t}`));
+        const worker = async () => {
+            for (let job = jobs.shift(); job; job = jobs.shift()) {
+                o.onEvent?.({ type: "case:start", profile: target.name, caseId: job.c.id });
+                const r = await runOne(target, job.c, o, job.t);
                 results.push(r);
-                o.onEvent?.({ type: "case:done", profile: target.name, caseId: c.id, result: r });
+                o.onEvent?.({ type: "case:done", profile: target.name, caseId: job.c.id, result: r });
             }
-        }
+        };
+        await Promise.all(Array.from({ length: Math.max(1, o.concurrency ?? 1) }, worker));
     };
     if (o.parallel)
         await Promise.all(o.profiles.map(runProfile));

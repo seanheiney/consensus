@@ -98,3 +98,19 @@ describe("self-consistency arm", () => {
     expect(renderBench(report)).toContain("selfx");
   });
 });
+
+describe("bench resume", () => {
+  it("keeps successful earlier answers, re-runs only failed or missing ones, and grades them all", async () => {
+    const m = fakePanelist("a:m", () => "fresh");
+    const grader = fakePanelist("g:m", (req) => JSON.stringify({ grades: [...req.messages[0]!.content.matchAll(/### Answer (\w)/g)].map(([, l]) => ({ answer: l, accuracy: 7, quality: 7, notes: "" })) }));
+    const c = SAMPLE_SUITE.cases[1]!;
+    const prev = [
+      { profile: "single:a:m", caseId: c.id, trial: 0, ok: true, ms: 1, converged: false, rounds: 0, usage: { inputTokens: 1, outputTokens: 1 }, costUsd: null, unpriced: [], dropped: [], answer: "kept", accuracy: 1, quality: 1 },
+      { profile: "single:a:m", caseId: c.id, trial: 1, ok: false, error: "limit", ms: 1, converged: false, rounds: 0, usage: { inputTokens: 0, outputTokens: 0 }, costUsd: null, unpriced: [], dropped: [], answer: "", accuracy: null, quality: null },
+    ];
+    const report = await runBench({ suite: { cases: [c] }, profiles: [{ name: "single:a:m", panel: [m], judge: m, rounds: 0, effort: "low", single: m }], grader, trials: 2, previous: prev as never, concurrency: 2 });
+    expect(m.calls).toHaveLength(1);
+    expect(report.results.map((r) => r.answer).sort()).toEqual(["fresh", "kept"]);
+    expect(report.results.every((r) => r.quality === 7)).toBe(true);
+  });
+});

@@ -17,7 +17,7 @@ import { describeProfile, editProfile, materializePreset, memberLabel, profileWa
 import { PRESETS } from "./catalog.js";
 import { PROVIDERS, VENDORS, createPanelist } from "./providers/index.js";
 import { PERSONAS } from "./personas.js";
-import { SAMPLE_SUITE, answerSection, loadSuite, renderBench, runBench, type BenchProfileTarget } from "./bench.js";
+import { SAMPLE_SUITE, answerSection, loadSuite, renderBench, runBench, type BenchProfileTarget, type CaseResult, type BenchReport } from "./bench.js";
 import { CATALOG_VENDORS as _CV, pickForTier, routeFor as _routeFor } from "./catalog.js";
 import { scanVendors as _scan } from "./doctor.js";
 import { ConsensusEngine } from "./protocol/engine.js";
@@ -661,8 +661,10 @@ bench
   .option("-b, --baseline <specs>", "comma-separated single-model baseline arms (no debate), e.g. claude:claude-opus-5,codex:gpt-5.6-sol")
   .option("--self-consistency <specs>", "comma-separated self-consistency arms: spec[xN] (same model answers N times, default 3, then merges its best), e.g. claude:claude-opus-5x3")
   .option("-o, --out <dir>", "output directory (default: .consensus/bench/<timestamp>)")
+  .option("--resume <dir>", "continue a saved bench: keep its successful answers, run only what is missing or failed, then grade everything (writes back to that directory unless --out)")
+  .option("--concurrency <n>", "cases to run at once within each arm (default 1; debates are long, but each seat's vendor rate limit still applies)", parseIntArg)
   .option("--json", "print results JSON instead of the report")
-  .action(async (o: { profiles?: string; suite?: string; cases?: string; grader?: string; parallel?: boolean; trials?: number; baseline?: string; selfConsistency?: string; out?: string; json?: boolean }) => {
+  .action(async (o: { profiles?: string; suite?: string; cases?: string; grader?: string; parallel?: boolean; trials?: number; baseline?: string; selfConsistency?: string; out?: string; resume?: string; concurrency?: number; json?: boolean }) => {
     const cfg = await loadConfig();
     const names = o.profiles ? o.profiles.split(",").map((x) => x.trim()) : Object.keys(cfg.profiles ?? {});
     if (!names.length) throw new Error("No profiles to benchmark. Run `consensus setup` or `consensus profile create` first.");
@@ -702,7 +704,9 @@ bench
       if (!graderSpec) throw new Error("No connected model to grade with; pass --grader.");
     }
     const grader = createPanelist(graderSpec, { effort: "high", env: credentialEnv() });
-    const outDir = o.out ?? join(cfg.runsDir ? join(cfg.runsDir, "..", "bench") : ".consensus/bench", new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z"));
+    const previous: CaseResult[] | undefined = o.resume ? (JSON.parse(await readFile(join(o.resume, "results.json"), "utf8")) as BenchReport).results : undefined;
+    if (previous) log(dim(`resuming ${o.resume}: ${previous.filter((r) => r.ok).length} successful answer(s) kept, the rest will run`));
+    const outDir = o.out ?? o.resume ?? join(cfg.runsDir ? join(cfg.runsDir, "..", "bench") : ".consensus/bench", new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z"));
     const calls = targets.reduce((n, t) => n + (t.single ? 1 : t.panel.length * (1 + 2 * t.rounds) + 1), 0) * suite.cases.length * Math.max(1, o.trials ?? 1);
     log(dim(`arms: ${targets.map((t) => t.name).join(", ")}  cases: ${suite.cases.map((c) => c.id).join(", ")}  grader: ${grader.id}`));
     log(dim(`up to ~${calls} model calls across ${targets.length} arm(s); expect minutes to tens of minutes${o.parallel ? "" : " (add --parallel to run arms concurrently)"}`));
@@ -713,6 +717,8 @@ bench
       grader,
       parallel: o.parallel,
       trials: o.trials,
+      concurrency: o.concurrency,
+      previous,
       outDir,
       onEvent: (e) => {
         if (e.type === "case:start") log(bold(`\n▶ ${e.profile} / ${e.caseId}`));

@@ -109,8 +109,12 @@ export interface BenchOptions {
     grader: Panelist;
     /** Repeat every case this many times per profile and average (default 1). */
     trials?: number;
-    /** Run profiles concurrently (each profile's cases stay sequential). */
+    /** Run profiles concurrently. */
     parallel?: boolean;
+    /** Cases run at once within one profile (default 1). */
+    concurrency?: number;
+    /** Results from an earlier run of the same bench: successful ones are kept and not re-run (resume). */
+    previous?: CaseResult[];
     /** Seed for grader shuffles (recorded in the report). */
     seed?: number;
     outDir?: string;
