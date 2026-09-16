@@ -12,6 +12,66 @@ import { ConsensusEngine } from "./protocol/engine.js";
 import { renderReport } from "./report.js";
 import { saveRun } from "./store.js";
 import { G, progressLogger } from "./progress.js";
+import { existsSync } from "node:fs";
+import { createRequire } from "node:module";
+import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { credentialsPath } from "./credentials.js";
+import { findReceipt, installKind } from "./install-receipt.js";
+import { onPath } from "./providers/index.js";
+const { version } = createRequire(import.meta.url)("../package.json");
+function tilde(path) {
+    const h = process.env.HOME || homedir();
+    return path === h ? "~" : path.startsWith(h + "/") || path.startsWith(h + "\\") ? `~${path.slice(h.length)}` : path;
+}
+/** The end-of-setup "what happened" screen: every row is something setup or the installer actually did. */
+export function setupSummary(i) {
+    const env = i.env ?? process.env;
+    const rows = [];
+    const kind = installKind(env, fileURLToPath(import.meta.url));
+    const inst = kind === "standalone" ? findReceipt(env) : undefined;
+    const onPathNow = onPath("consensus", env);
+    if (inst) {
+        rows.push(["Installed", `consensus ${inst.receipt?.version ?? version} (bundled Node ${process.versions.node}) in ${tilde(inst.root)}`]);
+        if (inst.receipt?.launcher)
+            rows.push(["Launcher", tilde(inst.receipt.launcher)]);
+        const rc = (inst.receipt?.rcFiles ?? []).map(tilde);
+        const hint = env.CONSENSUS_PATH_HINT;
+        if (onPathNow)
+            rows.push(["PATH", `consensus is on PATH${rc.length ? ` (via ${rc.join(", ")})` : ""}`]);
+        else if (rc.length)
+            rows.push(["PATH", `new terminals: ok (${rc.join(", ")}); ${hint || `this one: source ${tilde(inst.receipt?.envFile ?? "~/.consensus/env")}`}`]);
+        else
+            rows.push(["PATH", hint || `not on PATH: add ${tilde(inst.receipt?.binDir ?? "~/.local/bin")} to PATH`]);
+    }
+    else {
+        rows.push(["Installed", `consensus ${version} (${kind === "npm" ? "npm package" : "source checkout"}, Node ${process.versions.node})`]);
+        rows.push(["PATH", onPathNow ? "consensus is on PATH" : "consensus is not on this shell's PATH"]);
+    }
+    rows.push(["Accounts", i.statuses.map((s) => `${s.connected ? G.ok : G.no} ${s.label}${s.connected ? (s.via === "cli" && s.cli ? ` via ${s.cli.name}` : " key") : ""}`).join("   ")]);
+    const names = Object.keys(i.cfg.profiles ?? {});
+    rows.push(["Profiles", `${names.length ? names.map((n) => (n === i.cfg.profile ? `${n} (default)` : n)).join(", ") : "none"}   ${tilde(i.cfgPath)}`]);
+    if (existsSync(credentialsPath()))
+        rows.push(["Keys", `${tilde(credentialsPath())} (mode 600)`]);
+    rows.push(["IDEs wired", i.wired.length ? i.wired.join(", ") : "none"]);
+    if (i.wired.length)
+        rows.push(["MCP command", i.mcpCommand.map((x) => tilde(x)).join(" ")]);
+    rows.push(["Telemetry", "none. Nothing is sent to any consensus-operated service; there isn't one."]);
+    const width = Math.max(...rows.map(([k]) => k.length)) + 2;
+    const lines = rows.map(([k, v]) => `${k.padEnd(width)}${v}`);
+    lines.push("");
+    if (i.ready) {
+        lines.push(`Try:  consensus "Should we use optimistic locking or a distributed lock for inventory holds?"`);
+        lines.push("      consensus doctor        consensus --help        consensus uninstall --all");
+    }
+    else {
+        const n = i.statuses.filter((s) => s.connected).length;
+        lines.push(`Not ready yet: ${n === 0 ? "no models connected" : `${n} model connected`}; a panel needs 2.`);
+        lines.push("Next: consensus connect openrouter   (one OpenRouter key seats every vendor)");
+        lines.push("  or: consensus connect <anthropic|openai|google|xai>, then consensus doctor");
+    }
+    return lines.join("\n");
+}
 const SAMPLE_PROBLEM = "A small team is adding background jobs to a Node web app on Postgres. Should they start with a Postgres-backed queue (SKIP LOCKED) or adopt Redis/BullMQ from day one? Decide and justify in under 300 words.";
 /** Guided first debate: proves the install works and shows what a result looks like. */
 async function firstRun(cfg) {
@@ -190,7 +250,9 @@ export async function runSetup(o = {}) {
     }
     const cmd = mcpLaunchCommand();
     const lines = [];
+    const wired = [];
     for (const h of hosts.filter((x) => chosen.includes(x.id))) {
+        const before = lines.length;
         if (h.installMcp) {
             try {
                 lines.push(`${h.name}: MCP ${await h.installMcp(cmd)}`);
@@ -208,6 +270,8 @@ export async function runSetup(o = {}) {
                 lines.push(`${h.name}: skill failed: ${err.message}`);
             }
         }
+        if (lines.slice(before).some((l) => !l.includes(" failed: ")))
+            wired.push(h.id === "agents-standard" ? "~/.agents/skills" : h.name);
     }
     if (lines.length)
         p.note(lines.join("\n"), `Installed (MCP command: ${cmd.join(" ")})`);
@@ -232,5 +296,12 @@ export async function runSetup(o = {}) {
         p.log.info("No first debate under --yes (add --first-run to run one). Try: consensus \"…\" --profile fast");
     else if (o.firstRun === false)
         p.log.info("Skipped the first debate (--no-first-run).");
-    p.outro(`Done. Try:  consensus "Should we use optimistic locking or a distributed lock for inventory holds?"${cfg.profile ? `  (profile: ${cfg.profile})` : ""}`);
+    p.note(setupSummary({ statuses, cfg, cfgPath, wired, mcpCommand: cmd, ready: reachable >= 2 }), reachable >= 2 ? "You're set up" : "Installed, not ready yet");
+    if (reachable >= 2)
+        p.outro(`Done.${cfg.profile ? ` Default profile: ${cfg.profile}.` : ""}`);
+    else {
+        p.outro("Connect one more model, then ask your first question.");
+        if (o.yes)
+            process.exitCode = 3;
+    }
 }

@@ -16,11 +16,22 @@ export interface Host {
 }
 /**
  * The command other tools should launch to start our MCP server.
- * A `consensus` binary on PATH is preferred; otherwise the absolute path of
- * this very install (works for a git checkout and for npx caches alike).
+ *
+ * - Standalone install (install.sh / install.ps1): always the absolute stable
+ *   launcher (~/.local/bin/consensus, or ~/.consensus/current/bin/consensus).
+ *   It survives upgrades, never depends on a versioned Node path, and does not
+ *   rely on the host inheriting a shell PATH.
+ * - Otherwise a `consensus` binary on PATH is preferred, then the absolute
+ *   path of this very install (source checkout, npm global, npx cache).
+ *
+ * `absolute` is for GUI apps (Cursor, Windsurf, Claude Desktop, VS Code, Zed),
+ * which do not inherit a shell PATH. `portable` is for project files
+ * (.mcp.json) that get committed and must not contain a home-directory path.
  */
 export declare function mcpLaunchCommand(opts?: {
     absolute?: boolean;
+    portable?: boolean;
+    env?: NodeJS.ProcessEnv;
 }): string[];
 export declare function listHosts(): Host[];
 /** Make sure `.consensus/` (saved debates contain verbatim prompts and context) is ignored. */
