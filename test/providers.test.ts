@@ -37,7 +37,10 @@ describe("resolveRun", () => {
     const r = await resolveRun({ cfg: {}, env });
     expect(r.source).toBe("auto");
     expect(r.panel.map((p) => p.id)).toEqual(["anthropic:claude-fable-5-1", "openai:gpt-6-astra"]);
-    expect(r.judge.id).toBe("anthropic:claude-fable-5-1");
+    // the captain (best model not on the panel) is the default reporter
+    expect(r.captain).toBeDefined();
+    expect(r.judge.id).toBe(r.captain!.id);
+    expect(r.panel.map((p) => p.id)).not.toContain(r.judge.id);
   });
   it("fails with fewer than two connections", async () => {
     await expect(resolveRun({ cfg: {}, env: { OPENAI_API_KEY: "k", PATH: "/nonexistent" } })).rejects.toThrow(/at least 2/);

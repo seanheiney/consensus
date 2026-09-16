@@ -38,6 +38,8 @@ Preferred: the MCP tool \`consensus\` (server name \`consensus\`). Arguments:
 - \`panel\` (optional): explicit seats like \`["claude+skeptic", "codex:gpt-5.6-sol", "claude+security"]\` when the user asks for particular models or perspectives.
 - \`rounds\` (optional, default 3) and \`effort\` (optional, low|medium|high|xhigh|max).
 
+Every run has a captain by default: the best available model (preferring one not on the panel) moderates after each critique round, referees disputes it can settle, puts direct questions to seats that are stuck, may grant one extra round, and writes the report; pass \`captain: "none"\` to disable or a spec to choose one.
+
 Two companion tools: \`consensus_design\` turns a plain-English brief ("4 panelists: security, distributed systems, a PM, a skeptic; frontier models") into a saved profile with personas and returns its name; \`consensus_profiles\` lists profiles and which vendors are connected (call it first if unsure). Runs take 1-4 minutes for small panels and 10+ for frontier profiles with 3 rounds; if your MCP client supports it, pass \`_meta.progressToken\` on the call to receive progress notifications (phase, seat done, converged) instead of silence.
 
 Fallback if the MCP tool is not available: run the CLI and read stdout.

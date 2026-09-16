@@ -26,6 +26,7 @@ export interface BenchProfileTarget {
     name: string;
     panel: Panelist[];
     judge: Panelist;
+    captain?: Panelist;
     rounds: number;
     effort: import("./types.js").Effort;
     /** Baseline arm: one model answering once, no debate. `panel`/`judge` are ignored. */

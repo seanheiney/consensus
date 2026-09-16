@@ -60,12 +60,13 @@ export function createMcpServer(): McpServer {
         transcript: z.boolean().optional().describe("Return the full report and debate transcript instead of the short summary."),
         max_cost: z.number().positive().optional().describe("Abort once spend billed to API keys exceeds this many USD (default from the user's config)."),
         max_spend: z.number().positive().optional().describe("Abort once billed spend plus the list-price equivalent of subscription seats exceeds this many USD."),
+        captain: z.string().optional().describe("Captain spec, 'auto' (default: best available model, preferring one not on the panel) or 'none'. The captain moderates each round, referees disputes, facilitates, and writes the report."),
       },
       annotations: { title: "Panel consensus", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async ({ prompt, context, profile, panel, rounds, effort, transcript, max_cost, max_spend }, extra) => {
+    async ({ prompt, context, profile, panel, rounds, effort, transcript, max_cost, max_spend, captain }, extra) => {
       const cfg = await loadConfig();
-      const r = await resolveRun({ cfg, panel, profile, rounds, effort, env: credentialEnv() });
+      const r = await resolveRun({ cfg, panel, profile, rounds, effort, captain, env: credentialEnv() });
       const runsDir = cfg.runsDir ?? ".consensus/runs";
       const token = extra._meta?.progressToken;
       let debate: Awaited<ReturnType<typeof openDebateLog>> | undefined;
@@ -89,7 +90,7 @@ export function createMcpServer(): McpServer {
           void extra.sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: Math.min(step, total - 1), total, message: msg } }).catch(() => undefined);
         }
       };
-      const engine = new ConsensusEngine({ panel: r.panel, judge: r.judge, rounds: r.rounds, effort: r.effort, maxTokens: cfg.maxTokens, maxCostUsd: max_cost ?? cfg.maxCostUsd, maxSpendUsd: max_spend ?? cfg.maxSpendUsd, onEvent, signal: extra.signal });
+      const engine = new ConsensusEngine({ panel: r.panel, judge: r.judge, captain: r.captain, rounds: r.rounds, effort: r.effort, maxTokens: cfg.maxTokens, maxCostUsd: max_cost ?? cfg.maxCostUsd, maxSpendUsd: max_spend ?? cfg.maxSpendUsd, onEvent, signal: extra.signal });
       const run = await engine.run(prompt, context);
       await debate?.close();
       let saved = "";
@@ -115,7 +116,7 @@ export function createMcpServer(): McpServer {
         `# Confidence\n\n${confidence || "(not stated)"}`,
         `# Unresolved disagreements\n\n${unresolved || "(none stated)"}`,
         `---`,
-        `Panel: ${seats}. ${run.converged ? `Converged after ${run.rounds.length} round(s).` : `Did not fully converge after ${run.rounds.length} round(s).`}${Object.keys(run.dropped).length ? ` Dropped: ${Object.keys(run.dropped).join(", ")}.` : ""}`,
+        `Panel: ${seats}.${run.captain ? ` Captain: ${run.captain}.` : ""} ${run.converged ? `Converged after ${run.rounds.length} round(s).` : `Did not fully converge after ${run.rounds.length} round(s).`}${Object.keys(run.dropped).length ? ` Dropped: ${Object.keys(run.dropped).join(", ")}.` : ""}`,
         `Cost: ${describeCost(cost)}.`,
         saved ? `Full debate: ${saved}/debate.md  (or \`consensus log ${run.id}\`). Call again with transcript=true for the whole report.` : "",
       ]

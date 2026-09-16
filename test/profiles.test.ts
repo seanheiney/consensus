@@ -13,7 +13,8 @@ describe("presets", () => {
   it("materializes per-vendor presets with the connected provider and effort", () => {
     const frontier = materializePreset(PRESETS.find((p) => p.name === "frontier")!, two)!;
     expect(frontier.panel).toEqual(["claude:claude-fable-5-1#max", "codex:gpt-6-astra#max", "xai:grok-4.6#max"]);
-    expect(frontier.judge).toBe("claude:claude-fable-5-1");
+    expect(frontier.captain).toBe("auto");
+    expect(frontier.judge).toBeUndefined();
     const budget = materializePreset(PRESETS.find((p) => p.name === "budget")!, two)!;
     expect(budget.panel).toEqual(["claude:claude-haiku-4-5#medium", "codex:gpt-5.6-luna#medium", "xai:grok-4.3#medium"]);
     expect(budget.rounds).toBe(2);

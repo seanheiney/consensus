@@ -72,6 +72,7 @@ export interface BenchProfileTarget {
   name: string;
   panel: Panelist[];
   judge: Panelist;
+  captain?: Panelist;
   rounds: number;
   effort: import("./types.js").Effort;
   /** Baseline arm: one model answering once, no debate. `panel`/`judge` are ignored. */
@@ -309,6 +310,7 @@ async function runOne(target: BenchProfileTarget, c: BenchCase, o: BenchOptions,
     const engine = new ConsensusEngine({
       panel: target.panel,
       judge: target.judge,
+      captain: target.captain,
       rounds: target.rounds,
       effort: target.effort,
       onEvent: (e) => o.engineEvents?.(target.name, c.id, e),

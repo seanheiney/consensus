@@ -215,6 +215,7 @@ async function runOne(target, c, o, trial) {
         const engine = new ConsensusEngine({
             panel: target.panel,
             judge: target.judge,
+            captain: target.captain,
             rounds: target.rounds,
             effort: target.effort,
             onEvent: (e) => o.engineEvents?.(target.name, c.id, e),

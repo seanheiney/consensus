@@ -46,7 +46,7 @@ export function materializePreset(preset: Preset, statuses: VendorStatus[]): Pro
       for (const persona of preset.personas!) panel.push(`${base}+${persona}`);
     }
     if (panel.length < 2) return undefined;
-    return { description: preset.description, panel, judge: base.replace(/#\w+$/, ""), rounds: preset.rounds, effort: preset.effort };
+    return { description: preset.description, panel, captain: "auto", rounds: preset.rounds, effort: preset.effort };
   }
   const substitutions: string[] = [];
   if (preset.shape === "per-vendor") {
@@ -64,7 +64,7 @@ export function materializePreset(preset: Preset, statuses: VendorStatus[]): Pro
     }
   }
   if (panel.length < 2) return undefined;
-  return { description: preset.description, panel, judge: panel[0]!.replace(/#\w+$/, ""), rounds: preset.rounds, effort: preset.effort, ...(substitutions.length ? { substitutions } : {}) };
+  return { description: preset.description, panel, captain: "auto", rounds: preset.rounds, effort: preset.effort, ...(substitutions.length ? { substitutions } : {}) };
 }
 
 /** Every preset your connections can satisfy. Judges rotate across seats so no vendor is always the judge. */
@@ -74,8 +74,9 @@ export function starterProfiles(statuses: VendorStatus[]): Record<string, Profil
   for (const preset of PRESETS) {
     const prof = materializePreset(preset, statuses);
     if (!prof) continue;
-    // A judge that did not argue the case; falls back to a seat only when no other model can be seated.
-    prof.judge = "external:auto";
+    // The captain (best available model, neutral when possible) moderates and reports.
+    prof.captain = "auto";
+    delete prof.judge;
     i++;
     out[preset.name] = prof;
   }
@@ -220,12 +221,16 @@ export async function editProfile(statuses: VendorStatus[], existing?: Profile, 
     return editProfile(statuses, { ...(existing ?? {}), panel: members.length ? members : specs.map(formatSpec), personas: customPersonas } as Profile, profileName);
   }
 
-  const judge = await p.select({
-    message: "Who writes the final synthesis?",
-    options: members.map((m) => ({ value: m.replace(/#\w+(?=\+|$)/, ""), label: m })),
-    initialValue: existing?.judge ?? members[0]!.replace(/#\w+(?=\+|$)/, ""),
+  const captain = await p.select({
+    message: "Captain (moderates, referees, and writes the report)",
+    options: [
+      { value: "auto", label: "auto", hint: "best available model, preferring one not on the panel" },
+      ...members.map((m) => ({ value: m.replace(/#\w+(?=\+|$)/, ""), label: `seat: ${m}` })),
+      { value: "none", label: "none", hint: "no moderation; the first seat writes the synthesis" },
+    ],
+    initialValue: existing?.captain ?? "auto",
   });
-  bail(judge);
+  bail(captain);
 
   const rounds = await p.select({
     message: "Max debate rounds",
@@ -242,7 +247,7 @@ export async function editProfile(statuses: VendorStatus[], existing?: Profile, 
     profile: {
       description: String(description).trim() || undefined,
       panel: members,
-      judge: String(judge),
+      captain: String(captain),
       rounds: Number(rounds),
       effort: effortMode === "per-model" ? undefined : effort,
       personas: Object.keys(customPersonas).length ? customPersonas : undefined,
@@ -274,6 +279,7 @@ export function profileWarnings(prof: Profile, library: Record<string, string>):
 export function describeProfile(name: string, prof: Profile, active: boolean): string {
   const head = `${active ? "* " : "  "}${name}${prof.description ? `  — ${prof.description}` : ""}`;
   const body = prof.panel.map((s) => `      ${memberLabel(s)}`).join("\n");
-  const meta = `      judge ${prof.judge ?? memberLabel(prof.panel[0]!)}, rounds ${prof.rounds ?? 3}${prof.effort ? `, effort ${prof.effort}` : ""}${prof.substitutions?.length ? `\n      substituted: ${prof.substitutions.join("; ")}` : ""}`;
+  const cap = prof.captain ?? "auto";
+  const meta = `      captain ${cap}${prof.judge ? `, judge ${prof.judge}` : cap === "none" ? `, judge ${memberLabel(prof.panel[0]!)}` : ""}, rounds ${prof.rounds ?? 3}${prof.effort ? `, effort ${prof.effort}` : ""}${prof.substitutions?.length ? `\n      substituted: ${prof.substitutions.join("; ")}` : ""}`;
   return `${head}\n${body}\n${meta}`;
 }

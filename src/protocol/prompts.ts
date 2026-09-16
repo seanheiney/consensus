@@ -1,5 +1,57 @@
-import { CRITIQUE_SHAPE, REVISION_SHAPE } from "./schemas.js";
-import type { Critique } from "../types.js";
+import { CRITIQUE_SHAPE, MODERATION_SHAPE, REVISION_SHAPE } from "./schemas.js";
+import type { Critique, Moderation } from "../types.js";
+
+export const CAPTAIN_PROMPT = `You are the captain of a panel of independent AI models debating a problem. You did not write any of the answers. Your duties: moderate (find the disputes that matter and cut the ones that don't), referee (settle a dispute when the evidence or a checkable argument settles it, and say so plainly), and report (assemble the best compilation of what survived). You are rigorous, neutral between answers, and allergic to vague consensus: a dispute is either settled with a reason or carried forward with a concrete ask. Never invent claims that no answer made.`;
+
+export function moderatorPrompt(args: {
+  prompt: string;
+  context?: string;
+  round: number;
+  answers: Record<string, string>;
+  critiques: Record<string, Critique>;
+  /** True when this is the last scheduled round (the captain may request one more). */
+  lastScheduled?: boolean;
+}): string {
+  const critiqueLines: string[] = [];
+  for (const [from, c] of Object.entries(args.critiques)) {
+    for (const r of c.reviews) {
+      critiqueLines.push(`- ${from} on ${r.answer}: ${r.verdict}${r.strengths.length ? ` (strengths: ${r.strengths.join("; ")})` : ""}`);
+      for (const d of r.disputes) critiqueLines.push(`  - [${d.severity}] ${d.claim} — ${d.problem}${d.correction ? ` → ${d.correction}` : ""}`);
+    }
+  }
+  return `${problemBlock(args.prompt, args.context)}
+
+## Panel answers (round ${args.round})
+
+${answersBlock(args.answers)}
+
+## Critiques this round
+
+${critiqueLines.join("\n") || "None."}
+
+## Your task as captain${args.lastScheduled ? "\n\nThis is the last scheduled round. Set request_extra_round only if one more exchange would likely settle a dispute that matters." : ""}
+
+1. List what is now settled: claims every answer shares or nobody disputed after scrutiny.
+2. List the disputes that actually matter (merge duplicates, drop style nits). For each, state the positions by label, and if you can settle it (a checkable fact, a demonstrable error, a decisive argument), give a ruling with the reason; leave the ruling empty when it genuinely depends on judgment or missing information.
+3. Tell the seats exactly what their revision must address so the next round converges on the best answer, not the safest one.
+4. Facilitate: where two seats talk past each other or a seat is being vague, put a direct question to that seat (by label) that forces it to defend, test, or concede the specific point. If this is the last scheduled round and one more exchange would likely settle a key dispute, set request_extra_round to true.
+
+Respond with ONLY a JSON object of this shape:
+
+${MODERATION_SHAPE}`;
+}
+
+export function moderationBlock(m: Moderation, forSeat?: string): string {
+  const lines: string[] = [];
+  const mine = forSeat ? (m.questions_for_seats ?? []).filter((q) => q.seat === forSeat) : [];
+  if (mine.length) lines.push(`The captain asks YOU directly:\n${mine.map((q) => `- ${q.question}`).join("\n")}\nAnswer these explicitly in your revision (defend with evidence, test it, or concede).`);
+  if (m.settled.length) lines.push(`Settled (do not re-litigate): ${m.settled.map((s) => `- ${s}`).join("\n")}`);
+  for (const d of m.key_disputes) {
+    lines.push(`- Dispute: ${d.topic}\n  Positions: ${d.positions}${d.ruling ? `\n  Captain's ruling: ${d.ruling}` : "\n  Captain's ruling: none (judgment call; make your strongest case)"}\n  You must: ${d.ask}`);
+  }
+  if (m.guidance) lines.push(`Guidance: ${m.guidance}`);
+  return lines.join("\n");
+}
 
 export const SYSTEM_PROMPT = `You are one member of a panel of independent AI models convened to produce the best possible answer to a problem. The panel is adversarial by design: members try to find flaws in each other's reasoning, and only claims that survive scrutiny reach the final answer.
 
@@ -95,6 +147,7 @@ export function revisePrompt(args: {
   answers: Record<string, string>;
   critiques: Record<string, Critique>;
   own: string;
+  moderation?: Moderation;
 }): string {
   const self = args.critiques[args.own]?.self_review;
   const selfBlock =
@@ -111,7 +164,7 @@ ${answersBlock(args.answers, args.own)}
 
 ${critiquesAgainst(args.own, args.critiques)}
 
-${selfBlock}## Your task
+${selfBlock}${args.moderation ? `## Captain's brief for this round\n\nThe captain moderates the debate and referees disputes it can settle. A ruling is not an order to agree: if you can show the ruling is wrong, rebut it with evidence. But do not ignore it.\n\n${moderationBlock(args.moderation, args.own)}\n\n` : ""}## Your task
 
 1. Respond to every dispute raised against your answer. Concede it if it is right and fix your answer accordingly. Rebut it with a specific reason if it is wrong. Use "partial" when part of it stands. Do not concede to be agreeable, and do not rebut to save face.
 2. Update your answer. Incorporate anything from the other answers that you now believe is correct and useful. Leave out anything you cannot defend. If the panel disagrees on a point you still hold, keep it and make your strongest case for it, since it will be challenged again.
@@ -129,6 +182,8 @@ export function synthesizePrompt(args: {
   converged: boolean;
   answers: Record<string, string>;
   lastCritiques?: Record<string, Critique>;
+  /** Captain's briefs per round, when a captain moderated. */
+  moderations?: { round: number; moderation: Moderation }[];
   /** Per-round revision facts; empty when no revise phase ran. */
   revisions?: { round: number; label: string; positionChanged: boolean; conceded: string[]; rebutted: string[] }[];
 }): string {
@@ -163,7 +218,7 @@ ${disputes.length ? disputes.join("\n") : "None."}
 ## What actually changed during review (from the run record)
 
 ${changeLines}
-
+${args.moderations?.length ? `\n## Captain's briefs and rulings during the debate\n\n${args.moderations.map((m) => `### Round ${m.round}\n${moderationBlock(m.moderation)}`).join("\n\n")}\n` : ""}
 ## Your task
 
 You are the panel's synthesizer. Write the panel's unified answer to the problem.
@@ -186,6 +241,9 @@ Use exactly this structure, in markdown:
 
 # Unresolved disagreements
 <bullet list, each with the competing positions and your recommendation, or "None">
+${args.moderations?.length ? `
+# Referee rulings
+<bullet list of disputes the captain ruled on during the debate and whether the panel accepted each ruling, or "None">` : ""}
 
 # What changed during review
 <bullet list of positions that moved and what moved them, drawn ONLY from the run record above; if it says no revision phase ran, write exactly: "No revision phase ran; positions were not revised." Do not invent concessions.>`;

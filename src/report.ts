@@ -15,12 +15,14 @@ export function renderReport(run: ConsensusRun, opts: { transcript?: boolean } =
     : `did not fully converge after ${rounds} round${rounds === 1 ? "" : "s"}`;
 
   const judgeOnPanel = run.seats.some((s) => s.id === run.judge);
+  const rulings = run.rounds.reduce((n, r) => n + (r.moderation?.key_disputes.filter((d) => d.ruling).length ?? 0), 0);
+  const moderated = run.rounds.filter((r) => r.moderation).length;
   const lines: string[] = [
     run.synthesis,
     "",
     "---",
     "",
-    `_Panel ${status}. Panelists: ${panel}. Synthesized by ${run.judge}${judgeOnPanel ? " (a panelist; pass --judge external:<spec> for a judge that did not debate)" : " (external judge, did not debate)"}. Run ${run.id}._`,
+    `_Panel ${status}. Panelists: ${panel}.${run.captain ? ` Captain: ${run.captain} (moderated ${moderated} round${moderated === 1 ? "" : "s"}, ${rulings} referee ruling${rulings === 1 ? "" : "s"}).` : ""} Synthesized by ${run.judge}${judgeOnPanel ? " (a panelist; use a captain or --judge external:<spec> for a reporter that did not debate)" : " (did not debate)"}. Run ${run.id}._`,
     "",
     `_"Converged" means every seat accepted every other seat's answer as substantively equivalent: self-reported agreement, not verified correctness. Confidence is the judge's own estimate._`,
     ...(run.cost ? ["", `_Cost: ${run.cost.summary}._`] : []),

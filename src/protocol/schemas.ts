@@ -39,6 +39,36 @@ export const RevisionSchema = z.object({
   answer: str.min(1),
 });
 
+export const ModerationSchema = z.object({
+  settled: z.array(str).default([]),
+  key_disputes: z
+    .array(
+      z.object({
+        topic: str,
+        positions: str,
+        ruling: str.default(""),
+        ask: str,
+      }),
+    )
+    .default([]),
+  guidance: str.default(""),
+  questions_for_seats: z.array(z.object({ seat: str, question: str })).default([]),
+  request_extra_round: z.boolean().default(false),
+});
+
+export const MODERATION_SHAPE = `{
+  "settled": ["<claims every answer now shares, stated once>"],
+  "key_disputes": [
+    { "topic": "<the disagreement in one line>",
+      "positions": "<who holds what, by answer label, and the strongest argument each gave>",
+      "ruling": "<if you can settle it on the evidence or by a checkable argument, say who is right and why; otherwise empty>",
+      "ask": "<exactly what the seats must do about it in their revision>" }
+  ],
+  "guidance": "<two or three sentences steering the next round: what to stop arguing about, what to test, what a converged answer must contain>",
+  "questions_for_seats": [ { "seat": "<answer label>", "question": "<a direct question that forces that seat to defend, test, or concede a specific point>" } ],
+  "request_extra_round": <true only if this is the last scheduled round, the debate is still productive, and one more exchange would likely resolve a key dispute>
+}`;
+
 /** Human-readable schema descriptions embedded in prompts. */
 export const CRITIQUE_SHAPE = `{
   "self_review": { "errors": ["..."], "gaps": ["..."] },

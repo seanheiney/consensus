@@ -16,6 +16,7 @@ export declare const PackSchema: z.ZodObject<{
             name: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>]>>;
         judge: z.ZodOptional<z.ZodString>;
+        captain: z.ZodOptional<z.ZodString>;
         rounds: z.ZodOptional<z.ZodNumber>;
         effort: z.ZodOptional<z.ZodEnum<{
             high: "high";

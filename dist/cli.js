@@ -95,7 +95,8 @@ program
     .option("-c, --context <path>", "extra context file (code, docs, constraints) appended to the problem")
     .option("--profile <name>", "model profile to use (see `consensus profiles`)")
     .option("-p, --panel <specs>", "comma-separated panelists, e.g. claude,codex:gpt-5.6-sol,xai:grok-4.6#max")
-    .option("-j, --judge <spec>", "who writes the synthesis: a seat spec, `external:<spec>` for a model that did not debate, or `external:auto`")
+    .option("--captain <spec|auto|none>", "captain: moderates after each critique round, referees disputes, facilitates, writes the report (default auto = best available model, preferring one not on the panel)")
+    .option("-j, --judge <spec>", "override who writes the synthesis: a seat spec or `external:<spec>` (default: the captain)")
     .option("-r, --rounds <n>", "max critique/revise rounds", parseIntArg)
     .option("-e, --effort <level>", "low|medium|high|xhigh|max (default for models without their own #effort)", parseEffort)
     .option("--max-tokens <n>", "max output tokens per call", parseIntArg)
@@ -132,6 +133,7 @@ program
         panel: o.panel ? String(o.panel).split(",") : undefined,
         profile: o.profile,
         judge: o.judge,
+        captain: o.captain,
         rounds: o.rounds,
         effort: o.effort,
         env: credentialEnv(),
@@ -153,6 +155,8 @@ program
             log(yellow(`note: ${k} is set in your shell, so the ${p} seat will bill that API key, not your subscription`));
         log(dim(`panel${r.profile ? ` (${r.profile})` : ` (${r.source})`}: ${seats}`));
         const onPanel = r.panel.some((x) => x.id === r.judge.id);
+        if (r.captain)
+            log(dim(`captain: ${r.captain.id}${r.panel.some((x) => x.id === r.captain.id) ? " (also a seat)" : " (not on the panel)"}: moderates each round, referees disputes, may grant one extra round, writes the report`));
         const ceilings = [o.maxCost ?? cfg.maxCostUsd ? `billed ceiling $${o.maxCost ?? cfg.maxCostUsd}` : "", o.maxSpend ?? cfg.maxSpendUsd ? `total ceiling $${o.maxSpend ?? cfg.maxSpendUsd}` : ""].filter(Boolean).join(", ");
         const est = estimateMinutes(r.panel.length, r.rounds, r.effort);
         log(dim(`judge: ${r.judge.id}${onPanel ? "" : " (external, did not debate)"}  rounds: ${r.rounds}  cost: ${cliSeats === r.panel.length ? "subscription quota" : cliSeats ? "subscription quota + API tokens" : "API tokens"}; up to ${r.panel.length * (1 + 2 * r.rounds) + 1} model calls${ceilings ? `; ${ceilings}` : ""}`));
@@ -195,6 +199,7 @@ program
     const engine = new ConsensusEngine({
         panel: r.panel,
         judge: r.judge,
+        captain: r.captain,
         rounds: r.rounds,
         effort: r.effort,
         maxTokens: o.maxTokens ?? cfg.maxTokens,
@@ -571,9 +576,9 @@ profile
                 cfg.profile = undefined;
             changed.push(`${preset.name}: removed (no connection can seat it now; \`consensus profile create ${preset.name} --preset ${preset.name}\` brings it back)`);
         }
-        else if (JSON.stringify(fresh.panel) !== JSON.stringify(cur.panel)) {
+        else if (JSON.stringify([fresh.panel, fresh.judge]) !== JSON.stringify([cur.panel, cur.judge])) {
             cfg.profiles[preset.name] = { ...fresh, description: cur.description ?? fresh.description };
-            changed.push(`${preset.name}: ${fresh.panel.join(", ")}`);
+            changed.push(`${preset.name}: ${fresh.panel.join(", ")}  captain ${fresh.captain ?? "auto"}${fresh.judge ? `, judge ${fresh.judge}` : ""}`);
         }
     }
     if (!cfg.profile && Object.keys(cfg.profiles ?? {}).length)
@@ -732,7 +737,7 @@ bench
     const targets = [];
     for (const n of names) {
         const r = await resolveRun({ cfg, profile: n, env: credentialEnv() });
-        targets.push({ name: n, panel: r.panel, judge: r.judge, rounds: r.rounds, effort: r.effort });
+        targets.push({ name: n, panel: r.panel, judge: r.judge, captain: r.captain, rounds: r.rounds, effort: r.effort });
     }
     for (const spec of (o.baseline ?? "").split(",").map((x) => x.trim()).filter(Boolean)) {
         const single = createPanelist(spec, { effort: cfg.effort ?? "high", env: credentialEnv() });

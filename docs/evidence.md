@@ -26,6 +26,19 @@ Head-to-head on the same case and trial (wins / ties / losses for the panel):
 
 **What this does and does not show.** On easy objective questions a single frontier model is already correct; the panel's measurable effect here is on quality (completeness, verification, honesty about assumptions), where `balanced` beat both baselines and `fast` (cheap models, one round) did not beat the stronger single model. The cost of that quality gain is roughly 7× wall time and ~50× the tokens of a single Opus call. Nothing here tests hard or ambiguous problems, which is where a debate should matter most, and nothing here separates "a second model reviewed it" from "the models argued", because no revision ran.
 
+### Same runs, re-graded by an OpenAI model
+
+The first grader (Sonnet) shares a vendor with the Anthropic seats. Re-grading the identical 40 answers with `codex:gpt-5.6-sol` (`consensus bench regrade … -g codex:gpt-5.6-sol`; raw: [`ablation-2026-09-16-regrade-codex.json`](evidence/ablation-2026-09-16-regrade-codex.json)) flips the ranking:
+
+| Arm | n | Accuracy /10 | Quality /10 |
+|---|---:|---:|---:|
+| single:claude:claude-opus-5 | 10 | 9.8 | 8.9 |
+| single:codex:gpt-5.6-sol | 10 | 10.0 | 9.6 |
+| balanced | 10 | 10.0 | 9.1 |
+| fast | 10 | 9.4 | 8.6 |
+
+**Read together:** each grader rates its own vendor's answers higher (the Anthropic grader preferred the Anthropic-heavy panel and the Opus baseline; the OpenAI grader preferred the Sol baseline). Across both graders the `balanced` panel ties or trails the best single model on accuracy and is within a point on quality, at roughly 7× the wall time. On this easy suite there is **no evidence that the panel beats the best single model**; there is evidence that grader self-preference is large enough to manufacture a "win" in either direction, which is why the bench now warns on grader/vendor overlap and why every claim on this page cites two graders. The protocol changes made after this ablation (revision on any dispute, captain moderation with referee rulings) have not been measured yet.
+
 **Next measurements** (in priority order): re-run this suite under the new convergence rule and report how often revision fires and what it changes; add a harder suite (ambiguous design decisions with expert-written rubrics); re-grade every arm with a non-Anthropic grader (`consensus bench regrade <dir> -g codex:gpt-5.6-sol`) and report inter-grader agreement; add a "one model, N samples, majority vote" arm at matched cost.
 
 _How to reproduce:_ `consensus bench -P balanced,fast --baseline claude:claude-opus-5,codex:gpt-5.6-sol --trials 2 -g claude:claude-sonnet-5 --parallel`.

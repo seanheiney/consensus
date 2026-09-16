@@ -30,7 +30,10 @@ export type Member = z.infer<typeof MemberSchema>;
 export const ProfileSchema = z.object({
   description: z.string().optional(),
   panel: z.array(MemberSchema).min(2),
+  /** Who writes the synthesis. Default: the captain. */
   judge: z.string().optional(),
+  /** Captain (moderator, referee, reporter): a spec, "auto" (best available model, preferring one not on the panel), or "none". Default "auto". */
+  captain: z.string().optional(),
   rounds: z.number().int().min(1).max(10).optional(),
   effort: EffortSchema.optional(),
   /** Profile-local persona library: name -> prompt text. */
@@ -62,6 +65,7 @@ export const ConfigSchema = z.object({
   /** Legacy / project-level flat settings (used when no profile is active). */
   panel: z.array(z.string()).optional(),
   judge: z.string().optional(),
+  captain: z.string().optional(),
   rounds: z.number().int().min(1).max(10).optional(),
   effort: EffortSchema.optional(),
   maxTokens: z.number().int().positive().optional(),
@@ -152,6 +156,8 @@ export interface ResolveOptions {
   panel?: Member[];
   profile?: string;
   judge?: string;
+  /** Captain spec, "auto" or "none"; default from the profile, else "auto". */
+  captain?: string;
   rounds?: number;
   effort?: Effort;
   env?: NodeJS.ProcessEnv;
@@ -160,6 +166,7 @@ export interface ResolveOptions {
 export interface ResolvedRun {
   panel: Panelist[];
   judge: Panelist;
+  captain?: Panelist;
   rounds: number;
   effort: Effort;
   profile?: string;
@@ -223,6 +230,23 @@ export function buildPanel(
     judge = found;
   }
   return { panel, judge };
+}
+
+/**
+ * The captain: the best model available, preferring a vendor that is NOT on the
+ * panel (neutral), then a different model of a vendor that is, then the strongest
+ * seatable model even if a seat uses it (it runs under the captain's own prompt).
+ */
+export async function autoCaptain(members: Member[], statuses: VendorStatus[]): Promise<string> {
+  try {
+    return await autoExternalJudge(members, statuses);
+  } catch {
+    for (const vendor of CATALOG_VENDORS) {
+      const pick = pickSeatable(vendor, "frontier", statuses);
+      if (pick) return pick.spec("high");
+    }
+    throw new Error("No connected model can act as captain; run `consensus setup`.");
+  }
 }
 
 /**
@@ -304,6 +328,19 @@ export async function resolveRun(o: ResolveOptions): Promise<ResolvedRun> {
   const library = cfg.personas ?? {};
   let statuses: VendorStatus[] | undefined;
   const scan = async () => (statuses ??= await scanVendors(env));
+  const makeCaptain = async (spec: string | undefined, members: Member[], effort: Effort | undefined): Promise<Panelist | undefined> => {
+    const want = spec ?? "auto";
+    if (want === "none") return undefined;
+    let concrete = want === "auto" ? await autoCaptain(members, await scan()) : want;
+    if (concrete.startsWith("any:")) {
+      const [m] = resolvePortableMembers([concrete], await scan());
+      concrete = typeof m === "string" ? m : m!.model;
+    }
+    const { spec: base, persona, name } = splitMember(concrete);
+    let p = createPanelist(parseSpec(base), { effort: effort ?? "high", env });
+    if (persona) p = withPersona(p, resolvePersona(persona, library, name));
+    return p;
+  };
   const concrete = async (members: Member[]): Promise<Member[]> => (hasPortable(members) ? resolvePortableMembers(members, await scan()) : members);
   const concreteJudge = async (spec: string | undefined, members?: Member[]): Promise<string | undefined> => {
     if (!spec) return spec;
@@ -322,8 +359,11 @@ export async function resolveRun(o: ResolveOptions): Promise<ResolvedRun> {
     return ext ? `external:${bare}` : bare;
   };
   if (o.panel?.length) {
-    const { panel, judge } = buildPanel(await concrete(o.panel), o.effort ?? cfg.effort, await concreteJudge(o.judge ?? cfg.judge, o.panel), env, library);
-    return { panel, judge, rounds: o.rounds ?? cfg.rounds ?? 3, effort: o.effort ?? cfg.effort ?? "high", source: "flags" };
+    const members = await concrete(o.panel);
+    const captain = await makeCaptain(o.captain ?? cfg.captain, members, o.effort ?? cfg.effort);
+    const judgeSpec = o.judge ?? cfg.judge;
+    const { panel, judge } = buildPanel(members, o.effort ?? cfg.effort, await concreteJudge(judgeSpec, members), env, library);
+    return { panel, judge: judgeSpec ? judge : (captain ?? judge), captain, rounds: o.rounds ?? cfg.rounds ?? 3, effort: o.effort ?? cfg.effort ?? "high", source: "flags" };
   }
 
   const profileName = o.profile ?? cfg.profile;
@@ -334,13 +374,19 @@ export async function resolveRun(o: ResolveOptions): Promise<ResolvedRun> {
       throw new Error(`Unknown profile "${profileName}". ${known.length ? `Known: ${known.join(", ")}` : "No profiles defined; run `consensus setup` or `consensus profile create`."}`);
     }
     const effort = o.effort ?? prof.effort ?? cfg.effort ?? "high";
-    const { panel, judge } = buildPanel(await concrete(prof.panel), effort, await concreteJudge(o.judge ?? prof.judge, prof.panel), env, { ...library, ...prof.personas });
-    return { panel, judge, rounds: o.rounds ?? prof.rounds ?? cfg.rounds ?? 3, effort, profile: profileName, source: "profile" };
+    const members = await concrete(prof.panel);
+    const captain = await makeCaptain(o.captain ?? prof.captain ?? cfg.captain, members, effort);
+    const judgeSpec = o.judge ?? prof.judge;
+    const { panel, judge } = buildPanel(members, effort, await concreteJudge(judgeSpec, members), env, { ...library, ...prof.personas });
+    return { panel, judge: judgeSpec ? judge : (captain ?? judge), captain, rounds: o.rounds ?? prof.rounds ?? cfg.rounds ?? 3, effort, profile: profileName, source: "profile" };
   }
 
   if (cfg.panel?.length) {
-    const { panel, judge } = buildPanel(await concrete(cfg.panel), o.effort ?? cfg.effort, await concreteJudge(o.judge ?? cfg.judge, cfg.panel), env, library);
-    return { panel, judge, rounds: o.rounds ?? cfg.rounds ?? 3, effort: o.effort ?? cfg.effort ?? "high", source: "config" };
+    const members = await concrete(cfg.panel);
+    const captain = await makeCaptain(o.captain ?? cfg.captain, members, o.effort ?? cfg.effort);
+    const judgeSpec = o.judge ?? cfg.judge;
+    const { panel, judge } = buildPanel(members, o.effort ?? cfg.effort, await concreteJudge(judgeSpec, members), env, library);
+    return { panel, judge: judgeSpec ? judge : (captain ?? judge), captain, rounds: o.rounds ?? cfg.rounds ?? 3, effort: o.effort ?? cfg.effort ?? "high", source: "config" };
   }
 
   const specs = await autoDetectSpecs(env);
@@ -349,8 +395,10 @@ export async function resolveRun(o: ResolveOptions): Promise<ResolvedRun> {
       `Need at least 2 connected models, found ${specs.length}. Run \`consensus setup\` to connect your subscriptions or add API keys, or pass --panel.`,
     );
   }
-  const { panel, judge } = buildPanel(specs, o.effort ?? cfg.effort, await concreteJudge(o.judge ?? cfg.judge, specs), env, library);
-  return { panel, judge, rounds: o.rounds ?? cfg.rounds ?? 3, effort: o.effort ?? cfg.effort ?? "high", source: "auto" };
+  const captain = await makeCaptain(o.captain ?? cfg.captain, specs, o.effort ?? cfg.effort);
+  const judgeSpec = o.judge ?? cfg.judge;
+  const { panel, judge } = buildPanel(specs, o.effort ?? cfg.effort, await concreteJudge(judgeSpec, specs), env, library);
+  return { panel, judge: judgeSpec ? judge : (captain ?? judge), captain, rounds: o.rounds ?? cfg.rounds ?? 3, effort: o.effort ?? cfg.effort ?? "high", source: "auto" };
 }
 
 /**

@@ -24,6 +24,12 @@ export function progressLogger(quiet = false) {
             case "panelist:error":
                 log(red(`  ${G.err} ${e.label} ${e.panelist}: ${e.error}${e.dropped ? " (dropped)" : ""}`));
                 break;
+            case "moderation":
+                log(`  ${G.step} captain ${e.panelist}: ${e.moderation.settled.length} settled, ${e.moderation.key_disputes.length} dispute(s) carried, ${e.moderation.key_disputes.filter((d) => d.ruling).length} ruling(s)${e.moderation.questions_for_seats?.length ? `, ${e.moderation.questions_for_seats.length} question(s) to seats` : ""}`);
+                break;
+            case "extra-round":
+                log(yellow(`  captain ${e.panelist} granted one extra round after round ${e.round}`));
+                break;
             case "served-by":
                 log(yellow(`  ${e.label} ${e.panelist} was served by ${e.model} (refusal fallback) during ${e.phase}`));
                 break;

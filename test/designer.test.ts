@@ -25,7 +25,8 @@ describe("panel designer", () => {
     expect(m.profile.panel).toHaveLength(4);
     expect(m.profile.panel[0]).toMatch(/^claude:claude-fable-5-1#max\+security$/);
     expect(m.profile.panel[1]).toMatch(/^codex:gpt-6-astra#max\+performance$/);
-    expect(m.profile.judge).toBe("external:auto");
+    expect(m.profile.captain).toBe("auto");
+    expect(m.profile.judge).toBeUndefined();
     expect(Object.keys(m.personas)).toContain("product-manager");
     const { panel } = buildPanel(m.profile.panel, "high", undefined, { PATH: "/nonexistent" }, m.personas);
     expect(new Set(panel.map((p) => p.id)).size).toBe(4);

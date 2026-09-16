@@ -502,3 +502,17 @@ Claude Code, Codex CLI, Gemini CLI, Grok CLI, Cursor, Windsurf, Claude Desktop, 
 
 
 > `#xhigh` is a valid effort rung on every flag and spec that accepts effort. `consensus runs` prints to stdout (pipe-friendly); `consensus log --answer` prints only the `# Answer` section. Every report and `run.json` carries the run's cost summary (`cost.summary`). `consensus persona prune` removes custom personas no profile uses.
+
+
+## The captain
+
+Every run has a captain by default: a single frontier model, chosen as the best available (preferring a vendor that is not on the panel so it is neutral), that moderates, referees, facilitates, and reports. After each critique round it writes a **brief**: what is settled, which disputes matter (duplicates merged, nits dropped), a **referee ruling** wherever a dispute can be settled on evidence or a checkable argument, **direct questions** to seats that are stuck or vague, and exactly what each seat must address in its revision. The brief is injected into every seat's revise prompt (seats may still rebut a ruling with evidence). On the last scheduled round the captain may grant **one extra round** if another exchange would likely settle a dispute that matters. At the end it assembles the **report**: answer, confidence, agreements, unresolved disagreements, referee rulings, and what changed.
+
+```bash
+consensus "…"                                    # captain auto (default)
+consensus "…" --captain claude:claude-fable-5-1    # name the captain
+consensus "…" --captain none                     # no moderation; first seat synthesizes
+consensus "…" --judge codex:gpt-5.6-sol          # captain moderates, but this seat writes the report
+```
+
+In a profile: `"captain": "auto" | "<spec>" | "none"`. The debate log shows each round's brief and questions under "captain's brief"; `run.json` records the captain and every brief; the report footer counts rounds moderated and rulings made.

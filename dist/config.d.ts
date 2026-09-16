@@ -19,6 +19,7 @@ export declare const ProfileSchema: z.ZodObject<{
         name: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>]>>;
     judge: z.ZodOptional<z.ZodString>;
+    captain: z.ZodOptional<z.ZodString>;
     rounds: z.ZodOptional<z.ZodNumber>;
     effort: z.ZodOptional<z.ZodEnum<{
         high: "high";
@@ -41,6 +42,7 @@ export declare const ConfigSchema: z.ZodObject<{
             name: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>]>>;
         judge: z.ZodOptional<z.ZodString>;
+        captain: z.ZodOptional<z.ZodString>;
         rounds: z.ZodOptional<z.ZodNumber>;
         effort: z.ZodOptional<z.ZodEnum<{
             high: "high";
@@ -62,6 +64,7 @@ export declare const ConfigSchema: z.ZodObject<{
     }, z.core.$strip>>>;
     panel: z.ZodOptional<z.ZodArray<z.ZodString>>;
     judge: z.ZodOptional<z.ZodString>;
+    captain: z.ZodOptional<z.ZodString>;
     rounds: z.ZodOptional<z.ZodNumber>;
     effort: z.ZodOptional<z.ZodEnum<{
         high: "high";
@@ -95,6 +98,8 @@ export interface ResolveOptions {
     panel?: Member[];
     profile?: string;
     judge?: string;
+    /** Captain spec, "auto" or "none"; default from the profile, else "auto". */
+    captain?: string;
     rounds?: number;
     effort?: Effort;
     env?: NodeJS.ProcessEnv;
@@ -102,6 +107,7 @@ export interface ResolveOptions {
 export interface ResolvedRun {
     panel: Panelist[];
     judge: Panelist;
+    captain?: Panelist;
     rounds: number;
     effort: Effort;
     profile?: string;
@@ -119,6 +125,12 @@ export declare function buildPanel(members: Member[], defaultEffort: Effort | un
     panel: Panelist[];
     judge: Panelist;
 };
+/**
+ * The captain: the best model available, preferring a vendor that is NOT on the
+ * panel (neutral), then a different model of a vendor that is, then the strongest
+ * seatable model even if a seat uses it (it runs under the captain's own prompt).
+ */
+export declare function autoCaptain(members: Member[], statuses: VendorStatus[]): Promise<string>;
 /**
  * Pick a judge that did not debate: the strongest seatable model of a vendor
  * that is NOT on the panel; failing that, a different model of a vendor that is.

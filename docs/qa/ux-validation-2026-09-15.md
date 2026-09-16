@@ -225,3 +225,38 @@ Delta vs run 2: task-success +0.6 (the install path is real), trust +0.2, access
 ## 4. Next re-run
 
 After the docs rewrite lands and the ablation table exists: fresh panel, all five JTBDs re-driven. Expected: clarity ≥ 4 (docs), trust ≥ 3.5 (evidence + cost split), and the researcher's remaining P1 closed by the ablation.
+
+---
+
+# Re-run 3 — 2026-09-16, full QA cycle (all five walkthroughs re-driven, fresh panel)
+
+Scope: fresh Layer 0; all five JTBDs re-driven against the current build (install via the public one-liner into a fake home with Cursor, Windsurf and VS Code present; run with spend ceiling, replay and HTML share; profiles, personas, packs and the new plain-English designer; MCP including the design tool and progress notifications; benchmark against a single-model baseline plus the library); a fresh 5-reviewer panel.
+
+## 1. Rubric scoreboard (same five archetypes; runs 1 → 4)
+
+| Reviewer | task-success | clarity | trust | delight | accessibility |
+|---|---:|---:|---:|---:|---:|
+| R1 Solo AI power user | 4 → 3 → 4 → **4** | 3 → 4 → 3 → **4** | 2 → 3 → 3 → **4** | 4 → 4 → 4 → **5** | 4 → 4 → 4 → **4** |
+| R2 Staff engineer for a team | 4 → 3 → 4 → **4** | 3 → 3 → 4 → **4** | 2 → 3 → 3 → **3** | 4 → 4 → 4 → **4** | 3 → 3 → 4 → **4** |
+| R3 Anthropic platform engineer | 4 → 3 → 4 → **4** | 4 → 4 → 4 → **4** | 3 → 3 → 3 → **4** | 4 → 4 → 4 → **4** | 3 → 3 → 4 → **4** |
+| R4 OpenAI platform engineer | 3 → 4 → 3 → **4** | 3 → 3 → 3 → **4** | 2 → 2 → 3 → **3** | 4 → 4 → 3 → **4** | 3 → 3 → 4 → **4** |
+| R6 Skeptical researcher / maintainer | 3 → 3 → 4 → **3** | 3 → 4 → 4 → **4** | 2 → 3 → 3 → **4** | 4 → 4 → 4 → **4** | 4 → 4 → 4 → **4** |
+| **Mean** | **3.6 → 3.2 → 3.8 → 3.8** | **3.2 → 3.6 → 3.6 → 4.0** | **2.2 → 2.8 → 3.0 → 3.6** | **4.0 → 4.0 → 3.8 → 4.2** | **3.4 → 3.4 → 4.0 → 4.0** |
+
+All five walkthroughs PASS (install 7.8 s wiring three IDEs; run/replay/share; designer built a real four-seat payments panel; MCP design + run with 10 progress notifications; bench vs baseline and library first try). First 5 of the exercise (R1, delight).
+
+## 2. Findings from run 4 and their status
+
+- **[P0→fixed] The revise phase never ran in 20 measured runs** (R6): critics said "agree" 36/38 times, so concede-or-rebut was skipped on every easy case. Convergence now requires a clean sheet on first critique; any dispute (even minor) forces one revision. "Agree" is defined as "you would sign it as your own" and must name the strongest objection considered. Verified live: 5 disputes → both seats revised → converged in round 2.
+- **[P0→fixed] No spend ceiling on the MCP path; `--max-cost` vacuous on subscription panels** (R2, R3): `max_cost`/`max_spend` tool params, config defaults `maxCostUsd`/`maxSpendUsd`, and `--max-spend` counting subscription-equivalent spend.
+- **[P0→fixed] Ablation graded by a vendor on the panel; baseline arm confounded** (R6): baseline uses a plain expert prompt; `bench regrade` re-grades a saved bench with another model; cross-grader results published on `docs/evidence.md`.
+- **[P1→fixed]** `--yes` install ran a debate on quota without asking (now `--first-run` to opt in); no time estimate (now printed); judge is a debater by default (now a **captain** that did not debate moderates, referees, facilitates and reports; `external:auto` fallback); Claude Code cache-creation tokens dropped from input counts; the cache breakpoint sat on a block too small to cache (now the problem+context prefix); rubric leaked into the blind quality phase (now quality is graded with no reference or rubric; accuracy uses the reference or rubric); missing quality recorded as 0 (now null); Codex seats billing a shell `OPENAI_API_KEY` reported as quota (per-seat `billing` recorded from the actual auth); `run.json` effort vs applied effort (both recorded); MCP tools lacked annotations and progress totals; `consensus_design` could overwrite config silently; no pinnable release (`v0.1.0` tagged; `CONSENSUS_VERSION`); CI never checked the committed `dist/` (now it does, plus a Windows installer parse job); `openai:` seats without a key crashed before pre-flight; seeded grader shuffle; n and ±sd and head-to-head win counts in bench reports; `bench init` overwrite guard; `persona prune`; `runs` to stdout; `log --answer` answer-only; cost summary persisted in report and `run.json`.
+- **[P2, open]** `-p` vs `-P` case confusion (profile flag now long-form only); Gemini clean-room flag unverified without a Gemini key; the Anthropic API route still has no live evidence on this machine (no key); OpenAI-compatible adapter uses `json_object` not `json_schema`; `xhigh`/`max` collapse to `high` on OpenRouter; no lint.
+
+## 3. Evidence
+
+`docs/evidence.md` now carries the first ablation (40 runs, two graders). Honest summary: on the easy starter suite the panel ties the best single model; grader self-preference is visible in both directions; the revise phase never fired under the old rule. The protocol changes from this run (revision on any dispute, captain moderation) are unmeasured until the next ablation.
+
+## 4. Next re-run
+
+After the captain lands: ablation 2 on the same suite plus a harder judgment suite, two graders, `--trials 3`; then a fresh panel.

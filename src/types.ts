@@ -28,7 +28,7 @@ export interface CompletionRequest {
   effort?: Effort;
   signal?: AbortSignal;
   /** Which step of the protocol this call serves. */
-  phase?: "propose" | "critique" | "revise" | "synthesize" | "grade" | "probe";
+  phase?: "propose" | "critique" | "revise" | "moderate" | "synthesize" | "grade" | "probe";
 }
 
 export interface Usage {
@@ -102,6 +102,17 @@ export interface Critique {
   reviews: Review[];
 }
 
+/** The captain's brief after a critique round: what is settled, what must be answered, rulings on disputes it can settle. */
+export interface Moderation {
+  settled: string[];
+  key_disputes: { topic: string; positions: string; ruling?: string; ask: string }[];
+  guidance: string;
+  /** Direct questions the captain puts to specific seats to move a stuck dispute. */
+  questions_for_seats?: { seat: string; question: string }[];
+  /** The captain may ask for one extra round beyond the profile's maximum when the debate is productive but unresolved. */
+  request_extra_round?: boolean;
+}
+
 export interface Revision {
   responses: {
     from: string;
@@ -127,6 +138,8 @@ export interface RoundRecord {
   round: number;
   critiques: Record<string, Critique>; // keyed by label
   converged: boolean;
+  /** Captain's brief that drove the revision (absent without a captain or when converged). */
+  moderation?: Moderation;
   revisions?: Record<string, Revision>; // keyed by label
 }
 
@@ -148,6 +161,8 @@ export interface ConsensusRun {
   finalAnswers: Record<string, string>; // label -> answer at end
   converged: boolean;
   judge: string; // panelist id
+  /** The captain (moderator, referee, reporter) when one ran; it is also the judge unless a separate judge was named. */
+  captain?: string;
   synthesis: string;
   usage: Record<string, Usage>; // panelist id -> usage
   /** Cost summary computed at the end of the run (billed vs subscription-equivalent). */
@@ -162,6 +177,8 @@ export type ConsensusEvent =
   | { type: "critique"; label: string; panelist: string; round: number; critique: Critique }
   | { type: "revision"; label: string; panelist: string; round: number; revision: Revision }
   | { type: "synthesis"; panelist: string; text: string }
+  | { type: "moderation"; panelist: string; round: number; moderation: Moderation }
+  | { type: "extra-round"; panelist: string; round: number }
   | { type: "panelist:start"; label: string; panelist: string; phase: string }
   | { type: "panelist:done"; label: string; panelist: string; phase: string; ms: number; usage?: Usage }
   | { type: "panelist:error"; label: string; panelist: string; phase: string; error: string; dropped: boolean }
@@ -172,8 +189,10 @@ export type ConsensusEvent =
 
 export interface ConsensusOptions {
   panel: Panelist[];
-  /** Panelist that writes the final synthesis. Defaults to panel[0]. */
+  /** Panelist that writes the final synthesis. Defaults to the captain, else panel[0]. */
   judge?: Panelist;
+  /** Captain: moderates after each critique round (brief + referee rulings) and, unless a judge is given, writes the synthesis. */
+  captain?: Panelist;
   /** Maximum critique/revise rounds. Default 3. */
   rounds?: number;
   effort?: Effort;

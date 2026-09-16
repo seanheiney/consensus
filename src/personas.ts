@@ -85,7 +85,7 @@ export function withPersona(panelist: Panelist, persona: Persona): Panelist {
     billing: panelist.billing,
     effortApplied: panelist.effortApplied?.bind(panelist),
     async complete(req: CompletionRequest): Promise<CompletionResult> {
-      if (req.phase === "synthesize") return panelist.complete(req);
+      if (req.phase === "synthesize" || req.phase === "moderate") return panelist.complete(req);
       return panelist.complete({ ...req, system: personaSystemPrompt(req.system, persona) });
     },
   };

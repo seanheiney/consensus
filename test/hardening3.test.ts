@@ -59,10 +59,10 @@ describe("judges", () => {
     expect(j2).toMatch(/^claude:claude-(fable-5-1|sonnet-5|haiku-4-5)/);
 
   });
-  it("presets default to a judge that did not debate", () => {
+  it("presets default to an automatic captain", () => {
     const st = [status("anthropic", "claude", "cli"), status("openai", "codex", "cli", "0.160.0"), status("google", "google", "api"), status("xai", "grok", "cli"), status("openrouter", undefined)];
     const profs = starterProfiles(st);
-    for (const n of ["frontier", "balanced", "budget", "fast"]) expect(profs[n]!.judge).toBe("external:auto");
+    for (const n of ["frontier", "balanced", "budget", "fast"]) expect(profs[n]!.captain).toBe("auto");
   });
   it("external:auto falls back to the first seat only when nothing else can be seated", async () => {
     const only = [status("anthropic", "claude", "cli"), status("openai", undefined), status("google", undefined), status("xai", undefined), status("openrouter", undefined)];

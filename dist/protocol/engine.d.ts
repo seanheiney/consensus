@@ -20,6 +20,10 @@ export declare class ConsensusEngine {
     private checkCost;
     private current?;
     private call;
+    /** Call a non-seat panelist (the captain) and account its usage under its own id. */
+    private captainState?;
+    private callJsonWith;
+    private callWith;
     /** Call, parse JSON, validate; on failure ask the model once to repair. */
     private callJson;
 }

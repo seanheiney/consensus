@@ -12,9 +12,10 @@ export { createClaudeCliPanelist, createCodexCliPanelist, createGeminiCliPanelis
 export { CATALOG, PRESETS, STARTER_PROFILES } from "./catalog.js";
 export { PERSONAS, withPersona, resolvePersona } from "./personas.js";
 export { runBench, renderBench, estimateCost, gradeCase, loadSuite, SAMPLE_SUITE, BenchSuiteSchema, type BenchReport, type BenchSuite, type BenchCase } from "./bench.js";
-export { buildPanel, splitMember, memberId, resolvePortableMembers, parseConfigLenient, configWarnings, type Member } from "./config.js";
+export { buildPanel, splitMember, memberId, resolvePortableMembers, parseConfigLenient, configWarnings, autoCaptain, autoExternalJudge, type Member } from "./config.js";
 export { PackSchema, createPack, readPack, installPack, removePack, diffPack, describePack, portable, packSourceUrl, type Pack } from "./packs.js";
-export { CRITIQUE_SHAPE, REVISION_SHAPE, CritiqueSchema, RevisionSchema } from "./protocol/schemas.js";
+export { CRITIQUE_SHAPE, REVISION_SHAPE, MODERATION_SHAPE, CritiqueSchema, RevisionSchema, ModerationSchema } from "./protocol/schemas.js";
+export { CAPTAIN_PROMPT } from "./protocol/prompts.js";
 export { loadCredentials, credentialEnv, saveCredential } from "./credentials.js";
 export { scanVendors, probe, probeSpecs } from "./doctor.js";
 export { listHosts, mcpLaunchCommand, installProjectSkills, installProjectMcp } from "./hosts.js";

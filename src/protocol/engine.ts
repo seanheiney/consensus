@@ -6,6 +6,7 @@ import type {
   ConsensusOptions,
   ConsensusRun,
   Critique,
+  Moderation,
   Panelist,
   PanelistState,
   Revision,
@@ -13,8 +14,8 @@ import type {
   Usage,
 } from "../types.js";
 import { extractJson } from "./json.js";
-import { CritiqueSchema, RevisionSchema } from "./schemas.js";
-import { SYSTEM_PROMPT, critiquePrompt, problemBlock, proposePrompt, revisePrompt, synthesizePrompt } from "./prompts.js";
+import { CritiqueSchema, ModerationSchema, RevisionSchema } from "./schemas.js";
+import { CAPTAIN_PROMPT, SYSTEM_PROMPT, critiquePrompt, moderatorPrompt, problemBlock, proposePrompt, revisePrompt, synthesizePrompt } from "./prompts.js";
 import { z, type ZodType } from "zod";
 import { CostLimitError, describeCost, estimateCost } from "../cost.js";
 
@@ -94,7 +95,8 @@ export class ConsensusEngine {
   async run(prompt: string, context?: string): Promise<ConsensusRun> {
     const rounds = Math.max(1, this.opts.rounds ?? 3);
     const effort = this.opts.effort ?? "high";
-    const judge = this.opts.judge ?? this.opts.panel[0]!;
+    const captain = this.opts.captain;
+    const judge = this.opts.judge ?? captain ?? this.opts.panel[0]!;
     const seed = this.opts.seed ?? (Math.floor(Math.random() * 0xffffffff) >>> 0);
     const rnd = mulberry32(seed);
     this.rnd = rnd;
@@ -131,6 +133,7 @@ export class ConsensusEngine {
       finalAnswers: {},
       converged: false,
       judge: judge.id,
+      captain: captain?.id,
       synthesis: "",
       usage: {},
       dropped: {},
@@ -151,7 +154,9 @@ export class ConsensusEngine {
 
     // ---- Rounds: critique -> (converged?) -> revise ----------------------
     let lastCritiques: Record<string, Critique> | undefined;
-    for (let round = 1; round <= rounds; round++) {
+    let maxRounds = rounds;
+    let extraGranted = false;
+    for (let round = 1; round <= maxRounds; round++) {
       this.emit({ type: "phase", phase: "critique", round });
       const answers = this.answers(states);
       const critiques: Record<string, Critique> = {};
@@ -181,7 +186,7 @@ export class ConsensusEngine {
       // Round 1 with any dispute at all (even minor) goes through revise once, so corrections are
       // actually incorporated; convergence on first critique requires a clean sheet.
       const anyDispute = Object.values(critiques).some((c) => c.reviews.some((r) => r.disputes.length > 0));
-      const converged = this.isConverged(critiques, liveLabels) && (round > 1 || !anyDispute || round === rounds);
+      const converged = this.isConverged(critiques, liveLabels) && (round > 1 || !anyDispute || round === maxRounds);
       const record: RoundRecord = { round, critiques, converged };
       run.rounds.push(record);
       lastCritiques = critiques;
@@ -196,14 +201,31 @@ export class ConsensusEngine {
         0,
       );
       this.emit({ type: "not-converged", round, openDisputes: open });
-      if (round === rounds) break;
+
+      // Captain moderates: a brief with rulings drives the revision; on the last scheduled round it may ask for one more.
+      let moderation: Moderation | undefined;
+      if (captain && (round < maxRounds || !extraGranted)) {
+        try {
+          moderation = await this.callJsonWith(captain, "captain", CAPTAIN_PROMPT, [{ role: "user", content: moderatorPrompt({ prompt, context, round, answers, critiques, lastScheduled: round === maxRounds }), cachedPrefix: problemBlock(prompt, context) }], ModerationSchema, "moderate");
+          record.moderation = moderation;
+          this.emit({ type: "moderation", panelist: captain.id, round, moderation });
+          if (round === maxRounds && moderation.request_extra_round && !extraGranted) {
+            extraGranted = true;
+            maxRounds = rounds + 1;
+            this.emit({ type: "extra-round", panelist: captain.id, round });
+          }
+        } catch (err) {
+          this.emit({ type: "panelist:error", label: "captain", panelist: captain.id, phase: `moderate:${round}`, error: (err as Error).message, dropped: false });
+        }
+      }
+      if (round === maxRounds) break;
 
       this.emit({ type: "phase", phase: "revise", round });
       const revisions: Record<string, Revision> = {};
       await this.forEachActive(states, `revise:${round}`, async (s) => {
         const r = await this.callJson(
           s,
-          [{ role: "user", content: revisePrompt({ prompt, context, round, answers: this.reorder(answers), critiques, own: s.label }), cachedPrefix: problemBlock(prompt, context) }],
+          [{ role: "user", content: revisePrompt({ prompt, context, round, answers: this.reorder(answers), critiques, own: s.label, moderation }), cachedPrefix: problemBlock(prompt, context) }],
           RevisionSchema,
           "revise",
         );
@@ -222,7 +244,9 @@ export class ConsensusEngine {
     const judgeState = states.find((s) => s.panelist.id === judge.id && s.active);
     // An off-panel judge is an external synthesizer: it never argued the case.
     const external: PanelistState | undefined = !onPanel
-      ? { panelist: judge, label: "J", answer: "", usage: { inputTokens: 0, outputTokens: 0 }, active: true }
+      ? captain && judge.id === captain.id && this.captainState
+        ? this.captainState
+        : { panelist: judge, label: "J", answer: "", usage: { inputTokens: 0, outputTokens: 0 }, active: true }
       : undefined;
     const synthesizer: PanelistState =
       judgeState ??
@@ -232,10 +256,12 @@ export class ConsensusEngine {
         throw new Error("No active panelist available to synthesize");
       })();
     if (!judgeState && !external) run.judge = synthesizer.panelist.id;
-    if (external) states.push(external);
+    if (external && !states.includes(external)) states.push(external);
 
-    const synthesis = await this.call(
+    const synthesisSystem = captain && synthesizer.panelist.id === captain.id ? CAPTAIN_PROMPT : SYSTEM_PROMPT;
+    const synthesis = await this.callWith(
       synthesizer,
+      synthesisSystem,
       [
         {
           role: "user",
@@ -246,6 +272,7 @@ export class ConsensusEngine {
             converged: run.converged,
             answers: run.finalAnswers,
             lastCritiques,
+            moderations: run.rounds.filter((rr) => rr.moderation).map((rr) => ({ round: rr.round, moderation: rr.moderation! })),
             revisions: run.rounds.flatMap((rr) =>
               Object.entries(rr.revisions ?? {}).map(([label, rev]) => ({
                 round: rr.round,
@@ -264,6 +291,7 @@ export class ConsensusEngine {
     this.emit({ type: "synthesis", panelist: synthesizer.panelist.id, text: run.synthesis });
 
     for (const s of states) if (s.usage.reported) run.usage[s.panelist.id] = { ...s.usage, reported: undefined, billing: s.panelist.billing };
+    if (this.captainState?.usage.reported && !run.usage[this.captainState.panelist.id]) run.usage[this.captainState.panelist.id] = { ...this.captainState.usage, reported: undefined, billing: this.captainState.panelist.billing };
     const c = estimateCost(run.usage);
     run.cost = { billedUsd: c.usd, subscriptionEquivUsd: c.subscriptionEquivUsd, unpriced: c.unpriced, summary: describeCost(c) };
     run.finishedAt = new Date().toISOString();
@@ -369,8 +397,28 @@ export class ConsensusEngine {
   private current?: ConsensusRun;
 
   private async call(s: PanelistState, messages: ChatMessage[], phase: CompletionRequest["phase"], json = false, jsonSchema?: Record<string, unknown>): Promise<string> {
+    return this.callWith(s, SYSTEM_PROMPT, messages, phase, json, jsonSchema);
+  }
+
+  /** Call a non-seat panelist (the captain) and account its usage under its own id. */
+  private captainState?: PanelistState;
+  private async callJsonWith<T>(p: Panelist, label: string, system: string, messages: ChatMessage[], schema: ZodType<T>, phase: CompletionRequest["phase"]): Promise<T> {
+    this.captainState ??= { panelist: p, label, answer: "", usage: { inputTokens: 0, outputTokens: 0 }, active: true };
+    const jsonSchema = toStrictJsonSchema(schema);
+    const attempt = (text: string): T => schema.parse(extractJson(text));
+    const first = await this.callWith(this.captainState, system, messages, phase, true, jsonSchema);
+    try {
+      return attempt(first);
+    } catch (err) {
+      const why = err instanceof Error ? err.message : String(err);
+      const second = await this.callWith(this.captainState, system, [...messages, { role: "assistant", content: first }, { role: "user", content: `Your previous response could not be used: ${why.slice(0, 800)}\n\nRespond again with ONLY the JSON object, matching the requested shape exactly.` }], phase, true, jsonSchema);
+      return attempt(second);
+    }
+  }
+
+  private async callWith(s: PanelistState, system: string, messages: ChatMessage[], phase: CompletionRequest["phase"], json = false, jsonSchema?: Record<string, unknown>): Promise<string> {
     const res = await s.panelist.complete({
-      system: SYSTEM_PROMPT,
+      system,
       messages,
       json,
       jsonSchema,

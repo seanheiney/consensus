@@ -46,6 +46,23 @@ export function eventToMarkdown(e) {
             return `\n${formatCritique(e.label, e.panelist, e.critique)}\n`;
         case "revision":
             return `\n${formatRevision(e.label, e.panelist, e.revision)}\n`;
+        case "moderation": {
+            const m = e.moderation;
+            const lines = [`\n### Round ${e.round} — captain's brief (${e.panelist})`, ""];
+            if (m.settled.length)
+                lines.push("Settled:", ...m.settled.map((s) => `- ${s}`), "");
+            for (const d of m.key_disputes)
+                lines.push(`- **${d.topic}**`, `  - Positions: ${d.positions}`, d.ruling ? `  - Ruling: ${d.ruling}` : "  - Ruling: none (judgment call)", `  - Ask: ${d.ask}`);
+            for (const q of m.questions_for_seats ?? [])
+                lines.push(`- Question to ${q.seat}: ${q.question}`);
+            if (m.guidance)
+                lines.push("", `Guidance: ${m.guidance}`);
+            if (m.request_extra_round)
+                lines.push("", "_The captain asked for one extra round._");
+            return lines.join("\n") + "\n";
+        }
+        case "extra-round":
+            return `\n_Captain ${e.panelist} granted one extra round after round ${e.round}._\n`;
         case "converged":
             return `\n**Converged in round ${e.round}: every panelist accepted every other answer.**\n`;
         case "not-converged":
