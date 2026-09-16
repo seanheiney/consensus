@@ -1,13 +1,91 @@
 name: release
-# Publishes to npm when a v* tag is pushed. Add an NPM_TOKEN secret (automation token) to the repo once.
+# On a v* tag:
+#   1. builds self-contained archives (official Node 22 + bundled CLI + launcher) for every target,
+#      writes SHA256SUMS, smoke-tests the linux-x64 archive through install.sh, and attests provenance
+#   2. creates the GitHub Release with the archives, SHA256SUMS, install.sh and install.ps1
+#      (install.sh downloads releases/latest/download/consensus-<os>-<arch>.tar.gz)
+#   3. publishes consensus-panel to npm when an NPM_TOKEN secret exists (skipped otherwise)
 on:
   push:
     tags: ["v*"]
 jobs:
-  publish:
+  archives:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck && pnpm test && pnpm build
+      - name: tag matches package.json version
+        run: |
+          v=$(node -p 'require("./package.json").version')
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME does not match package.json version $v"; exit 1; }
+      - name: bundle
+        run: node scripts/bundle.mjs && node build/app/cli.mjs --version && node scripts/mcp-smoke.mjs node build/app/cli.mjs
+      - name: package every target
+        run: |
+          for target in darwin-arm64 darwin-x64 linux-x64 linux-arm64 win-x64 win-arm64; do
+            node scripts/package.mjs "${target%-*}" "${target#*-}"
+          done
+          node scripts/package.mjs sums
+          cp install.sh install.ps1 dist-release/
+      - name: smoke-test the linux-x64 archive through install.sh (no system node on PATH)
+        run: |
+          python3 -m http.server 8765 --directory dist-release >/dev/null 2>&1 &
+          sleep 1
+          scratch=$(mktemp -d)
+          env -i PATH=/usr/bin:/bin HOME="$scratch" CONSENSUS_DOWNLOAD_BASE=http://127.0.0.1:8765 sh install.sh --no-setup
+          env -i PATH=/usr/bin:/bin HOME="$scratch" "$scratch/.local/bin/consensus" --version
+          env -i PATH=/usr/bin:/bin HOME="$scratch" sh -lc 'consensus --version'
+          node scripts/mcp-smoke.mjs "$scratch/.local/bin/consensus"
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist-release/consensus-*.tar.gz
+            dist-release/consensus-*.zip
+            dist-release/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: |
+            dist-release/consensus-*.tar.gz
+            dist-release/consensus-*.zip
+            dist-release/SHA256SUMS
+            dist-release/install.sh
+            dist-release/install.ps1
+          if-no-files-found: error
+
+  release:
+    needs: archives
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: release-assets, path: dist-release }
+      - name: GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist-release/consensus-*.tar.gz
+            dist-release/consensus-*.zip
+            dist-release/SHA256SUMS
+            dist-release/install.sh
+            dist-release/install.ps1
+
+  npm:
+    needs: archives
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -16,13 +94,16 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm, registry-url: "https://registry.npmjs.org" }
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck && pnpm test && pnpm build
+      - run: pnpm build
       - run: npm pack --dry-run
       - name: publish
-        run: npm publish --access public --provenance
+        # Not fatal: the GitHub Release (and so the one-line installer) must not depend on npm.
+        continue-on-error: true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - name: GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::warning::NPM_TOKEN secret not set; skipping npm publish"
+            exit 0
+          fi
+          npm publish --access public --provenance
