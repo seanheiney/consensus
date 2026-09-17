@@ -76,6 +76,42 @@ export function answersBlock(answers, own) {
 }
 export function critiquePrompt(args) {
     const others = Object.keys(args.answers).filter((l) => l !== args.own);
+    if (args.round > 1 && args.prior) {
+        const since = others
+            .map((l) => {
+            const p = args.prior[l];
+            if (!p || (!p.raised.length && !p.responses.length))
+                return `#### Your earlier review of ${l}\nYou raised nothing against it last round.`;
+            const raised = p.raised.map((d) => `- [${d.severity}] ${d.claim}: ${d.problem}`).join("\n") || "- (none)";
+            const resp = p.responses.map((r) => `- ${r.action}: ${r.claim}${r.reason ? ` (${r.reason})` : ""}`).join("\n") || "- (no explicit response)";
+            return `#### Your earlier review of ${l}\nYou raised:\n${raised}\nIts author responded:\n${resp}`;
+        })
+            .join("\n\n");
+        return `${problemBlock(args.prompt, args.context)}
+
+## Panel answers after revision (round ${args.round})
+
+${answersBlock(args.answers, args.own)}
+
+## What you raised last round, and the responses
+
+${since}
+
+## Your task (follow-up round)
+
+This is not a fresh review. The point of this round is to settle the debate, not to find new things to say.
+
+1. For each earlier dispute of yours, check the revised answer: is it resolved (conceded and fixed, or rebutted convincingly)? A convincing rebuttal counts as resolved even if you would have phrased it differently. Carry a dispute forward only if it is still unresolved AND it matters, and say in "problem" why the response does not settle it.
+2. Raise a NEW dispute only if it is major: an error or omission that would change what a reader decides or does. Do not raise new minor points, polish, or wording this round.
+3. Verdict: "agree" means no major disagreement remains and you would accept this answer's recommendation (remaining minor differences are fine). "disagree" means at least one major dispute is still open.
+4. Review your own revised answer briefly in "self_review".
+
+Respond with ONLY a JSON object of this shape (no prose before or after):
+
+${CRITIQUE_SHAPE}
+
+Include one entry in "reviews" for each of: ${others.join(", ")}.`;
+    }
     return `${problemBlock(args.prompt, args.context)}
 
 ## Panel answers (round ${args.round})
@@ -182,6 +218,8 @@ You are the panel's synthesizer. Write the panel's unified answer to the problem
 - Do not paper over disagreement. Where a dispute remains open, present each position with its strongest argument, then say which you recommend and why, or say that the choice depends on a stated condition.
 - Do not water the answer down to the lowest common denominator. The result must be as specific and actionable as the best individual answer.
 - Do not mention model or company names.
+- The Answer section is for a reader who never saw the debate. Inside it, never refer to answers, panelists, seats or their labels ("A's script", "B argues", "the panel debated"). Attribution and history belong only in the sections after it.
+- Keep it proportionate. Write at the depth a strong senior practitioner would for this question, not the sum of every idea raised. Do not add machinery the problem does not call for; when two designs are equally correct, recommend the simpler one. The Answer section should normally be no longer than the longest final panel answer.
 
 Use exactly this structure, in markdown:
 
@@ -202,4 +240,15 @@ ${args.moderations?.length ? `
 
 # What changed during review
 <bullet list of positions that moved and what moved them, drawn ONLY from the run record above; if it says no revision phase ran, write exactly: "No revision phase ran; positions were not revised." Do not invent concessions.>`;
+}
+/** References to the debate that must not appear in a standalone answer ("A's script", "B argues", "answer C"). */
+const DEBATE_REF = /\b(?:[Aa]nswer|[Pp]anelist|[Ss]eat)\s+[A-H]\b|\b[A-H]['’]s\s+(?:script|answer|design|proposal|approach|version|plan|point)\b|\b[A-H]\s+(?:argues|argued|proposes|proposed|suggests|suggested|concedes|conceded|rebuts|rebutted|notes|noted)\b/;
+/** The first offending debate reference inside the "# Answer" section of a synthesis, if any. */
+export function debateLeak(synthesis) {
+    const m = synthesis.match(/^#\s+Answer\s*$([\s\S]*?)(?=^#\s+\S|(?![\s\S]))/m);
+    const body = m ? m[1] : "";
+    return body.match(DEBATE_REF)?.[0];
+}
+export function standaloneRepairPrompt(leak) {
+    return `Your report's Answer section refers to the debate (for example "${leak}"). A reader of the Answer section never saw the panel's answers. Rewrite the whole report with the same structure and substance, but make the Answer section stand alone: describe the recommendation itself, with no references to answers, panelists, seats or their labels. Keep attribution only in the later sections.`;
 }

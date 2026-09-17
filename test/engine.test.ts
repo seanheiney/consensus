@@ -161,3 +161,60 @@ describe("debate log events", () => {
     expect(md).toContain("## Synthesis");
   });
 });
+
+describe("follow-up critique rounds", () => {
+  it("round 2 shows each critic its own earlier disputes and the author's responses, and converges when no major dispute remains", async () => {
+    const { phaseOf, disagreeAll, otherLabels } = await import("./fake.js");
+    const prompts: string[] = [];
+    const mk = (id: string) => ({
+      id, provider: id.split(":")[0]!, model: "m",
+      async complete(req: import("../src/types.js").CompletionRequest) {
+        const p = phaseOf(req);
+        const text = req.messages.at(-1)!.content;
+        if (p === "critique") {
+          prompts.push(text);
+          if (!text.includes("follow-up round")) return { text: disagreeAll(req, "cache TTL is wrong"), usage: { inputTokens: 1, outputTokens: 1 } };
+          // follow-up: only a minor point remains
+          return { text: JSON.stringify({ self_review: { errors: [], gaps: [] }, reviews: otherLabels(req).map((answer) => ({ answer, verdict: "disagree", strengths: [], disputes: [{ claim: "wording", problem: "nit", correction: "", severity: "minor" }] })) }), usage: { inputTokens: 1, outputTokens: 1 } };
+        }
+        if (p === "revise") {
+          const from = [...text.matchAll(/### From panelist (\w)/g)].map((m) => m[1]);
+          return { text: JSON.stringify({ responses: from.map((f) => ({ from: f, claim: "cache TTL is wrong", action: "concede", reason: "fixed" })), position_changed: true, answer: `${id} revised` }), usage: { inputTokens: 1, outputTokens: 1 } };
+        }
+        return { text: p === "synthesize" ? "# Answer\nok" : `${id} proposal`, usage: { inputTokens: 1, outputTokens: 1 } };
+      },
+    });
+    const run = await new ConsensusEngine({ panel: [mk("a:m"), mk("b:m")], rounds: 3 }).run("q");
+    expect(run.converged).toBe(true);
+    expect(run.rounds).toHaveLength(2);
+    const followUp = prompts.find((t) => t.includes("follow-up round"))!;
+    expect(followUp).toContain("You raised:");
+    expect(followUp).toContain("[major] cache TTL is wrong");
+    expect(followUp).toContain("concede: cache TTL is wrong (fixed)");
+  });
+});
+
+describe("standalone answer guard", () => {
+  it("detects debate references only inside the Answer section", async () => {
+    const { debateLeak } = await import("../src/protocol/prompts.js");
+    expect(debateLeak("# Answer\nUse A's script with B's fallback.\n\n# Confidence\nhigh")).toBe("A's script");
+    expect(debateLeak("# Answer\nAs B argues, fail open.\n# Confidence\nx")).toBe("B argues");
+    expect(debateLeak("# Answer\nUse a token bucket. Plan A is fine.\n\n# What changed during review\nAnswer B conceded.")).toBeUndefined();
+  });
+  it("rewrites a leaking report once and keeps the clean rewrite", async () => {
+    const { phaseOf, agreeAll } = await import("./fake.js");
+    let synth = 0;
+    const mk = (id: string) => ({
+      id, provider: id.split(":")[0]!, model: "m",
+      async complete(req: import("../src/types.js").CompletionRequest) {
+        const p = req.phase ?? phaseOf(req);
+        if (p === "critique") return { text: agreeAll(req), usage: { inputTokens: 1, outputTokens: 1 } };
+        if (p === "synthesize") return { text: ++synth === 1 ? "# Answer\nAdopt A's design.\n\n# Confidence\nhigh" : "# Answer\nAdopt a token bucket.\n\n# Confidence\nhigh", usage: { inputTokens: 1, outputTokens: 1 } };
+        return { text: `${id} proposal`, usage: { inputTokens: 1, outputTokens: 1 } };
+      },
+    });
+    const run = await new ConsensusEngine({ panel: [mk("a:m"), mk("b:m")], rounds: 1 }).run("q");
+    expect(synth).toBe(2);
+    expect(run.synthesis).toContain("Adopt a token bucket.");
+  });
+});

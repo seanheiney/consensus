@@ -13,6 +13,8 @@ export declare class ConsensusEngine {
     private active;
     private answers;
     private requireQuorum;
+    /** For a follow-up critique: what `label` disputed last round in each other answer, and that author's responses to it. */
+    private priorFor;
     /** All panelists agreed with every other live answer. */
     private isConverged;
     /** Run `fn` for every active panelist concurrently; a failure (after one retry on transient errors) drops that panelist. */

@@ -15,7 +15,7 @@ import type {
 } from "../types.js";
 import { extractJson } from "./json.js";
 import { CritiqueSchema, ModerationSchema, RevisionSchema } from "./schemas.js";
-import { CAPTAIN_PROMPT, SYSTEM_PROMPT, critiquePrompt, moderatorPrompt, problemBlock, proposePrompt, revisePrompt, synthesizePrompt } from "./prompts.js";
+import { CAPTAIN_PROMPT, SYSTEM_PROMPT, critiquePrompt, moderatorPrompt, problemBlock, proposePrompt, revisePrompt, synthesizePrompt, debateLeak, standaloneRepairPrompt } from "./prompts.js";
 import { z, type ZodType } from "zod";
 import { CostLimitError, describeCost, estimateCost } from "../cost.js";
 
@@ -165,7 +165,7 @@ export class ConsensusEngine {
         // Each critic sees the answers in its own order (position bias mitigation); labels are unchanged.
         const c = await this.callJson(
           s,
-          [{ role: "user", content: critiquePrompt({ prompt, context, round, answers: this.reorder(answers), own: s.label }), cachedPrefix: problemBlock(prompt, context) }],
+          [{ role: "user", content: critiquePrompt({ prompt, context, round, answers: this.reorder(answers), own: s.label, prior: this.priorFor(s.label, run.rounds.at(-1)) }), cachedPrefix: problemBlock(prompt, context) }],
           CritiqueSchema,
           "critique",
         );
@@ -186,7 +186,10 @@ export class ConsensusEngine {
       // Round 1 with any dispute at all (even minor) goes through revise once, so corrections are
       // actually incorporated; convergence on first critique requires a clean sheet.
       const anyDispute = Object.values(critiques).some((c) => c.reviews.some((r) => r.disputes.length > 0));
-      const converged = this.isConverged(critiques, liveLabels) && (round > 1 || !anyDispute || round === maxRounds);
+      // Round 1 needs a clean sheet (any dispute forces a revision). From round 2 the follow-up critique only carries
+      // unresolved or new major disputes, so the panel has converged once no major dispute remains anywhere.
+      const noMajor = Object.values(critiques).every((c) => c.reviews.every((r) => !r.disputes.some((d) => d.severity === "major")));
+      const converged = round > 1 ? this.isConverged(critiques, liveLabels) || (noMajor && Object.keys(critiques).length === liveLabels.size) : this.isConverged(critiques, liveLabels) && (!anyDispute || round === maxRounds);
       const record: RoundRecord = { round, critiques, converged };
       run.rounds.push(record);
       lastCritiques = critiques;
@@ -300,6 +303,17 @@ export class ConsensusEngine {
       synthesis = await synthesize(seat, SYSTEM_PROMPT);
     }
     run.judge = writer.panelist.id;
+    // Guard: the Answer section must read on its own. One rewrite if it leaks debate references.
+    const leak = debateLeak(synthesis);
+    if (leak && !this.opts.signal?.aborted) {
+      try {
+        const writerSystem = captain && writer.panelist.id === captain.id ? CAPTAIN_PROMPT : SYSTEM_PROMPT;
+        const fixed = await this.callWith(writer, writerSystem, [{ role: "user", content: `Report to fix:\n\n${synthesis}` }, { role: "assistant", content: "Understood." }, { role: "user", content: standaloneRepairPrompt(leak) }], "synthesize");
+        if (/^#\s+Answer\s*$/m.test(fixed) && !debateLeak(fixed)) synthesis = fixed;
+      } catch {
+        /* keep the original report */
+      }
+    }
     run.synthesis = synthesis.trim();
     this.emit({ type: "synthesis", panelist: writer.panelist.id, text: run.synthesis });
 
@@ -340,6 +354,17 @@ export class ConsensusEngine {
         .join("\n");
       throw new Error(`Fewer than 2 panelists remain, cannot continue.\n${errs}`);
     }
+  }
+
+  /** For a follow-up critique: what `label` disputed last round in each other answer, and that author's responses to it. */
+  private priorFor(label: string, last: RoundRecord | undefined): Parameters<typeof critiquePrompt>[0]["prior"] {
+    if (!last) return undefined;
+    const out: NonNullable<Parameters<typeof critiquePrompt>[0]["prior"]> = {};
+    for (const review of last.critiques[label]?.reviews ?? []) {
+      const responses = (last.revisions?.[review.answer]?.responses ?? []).filter((r) => r.from.replace(/^(panelist|answer)\s+/i, "").trim().toUpperCase() === label.toUpperCase());
+      out[review.answer] = { raised: review.disputes.map((d) => ({ severity: d.severity, claim: d.claim, problem: d.problem })), responses: responses.map((r) => ({ claim: r.claim, action: r.action, reason: r.reason })) };
+    }
+    return out;
   }
 
   /** All panelists agreed with every other live answer. */

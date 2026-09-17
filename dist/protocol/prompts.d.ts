@@ -20,6 +20,19 @@ export declare function critiquePrompt(args: {
     round: number;
     answers: Record<string, string>;
     own: string;
+    /** Round 2+: what this critic raised last round against each answer, and how each author responded to it. */
+    prior?: Record<string, {
+        raised: {
+            severity: string;
+            claim: string;
+            problem: string;
+        }[];
+        responses: {
+            claim: string;
+            action: string;
+            reason: string;
+        }[];
+    }>;
 }): string;
 export declare function revisePrompt(args: {
     prompt: string;
@@ -51,3 +64,6 @@ export declare function synthesizePrompt(args: {
         rebutted: string[];
     }[];
 }): string;
+/** The first offending debate reference inside the "# Answer" section of a synthesis, if any. */
+export declare function debateLeak(synthesis: string): string | undefined;
+export declare function standaloneRepairPrompt(leak: string): string;
