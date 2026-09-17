@@ -111,6 +111,8 @@ export interface Moderation {
   questions_for_seats?: { seat: string; question: string }[];
   /** The captain may ask for one extra round beyond the profile's maximum when the debate is productive but unresolved. */
   request_extra_round?: boolean;
+  /** After round 1: the remaining disputes will not move, so skip further revision and write the report. */
+  stop_debate?: boolean;
 }
 
 export interface Revision {
@@ -179,6 +181,7 @@ export type ConsensusEvent =
   | { type: "synthesis"; panelist: string; text: string }
   | { type: "moderation"; panelist: string; round: number; moderation: Moderation }
   | { type: "extra-round"; panelist: string; round: number }
+  | { type: "stalemate"; panelist: string; round: number }
   | { type: "handoff"; label: string; from: string; to: string; phase: string; error: string }
   | { type: "panelist:start"; label: string; panelist: string; phase: string }
   | { type: "panelist:done"; label: string; panelist: string; phase: string; ms: number; usage?: Usage }

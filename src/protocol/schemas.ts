@@ -54,6 +54,7 @@ export const ModerationSchema = z.object({
   guidance: str.default(""),
   questions_for_seats: z.array(z.object({ seat: str, question: str })).default([]),
   request_extra_round: z.boolean().default(false),
+  stop_debate: z.boolean().default(false),
 });
 
 export const MODERATION_SHAPE = `{
@@ -66,7 +67,8 @@ export const MODERATION_SHAPE = `{
   ],
   "guidance": "<two or three sentences steering the next round: what to stop arguing about, what to test, what a converged answer must contain>",
   "questions_for_seats": [ { "seat": "<answer label>", "question": "<a direct question that forces that seat to defend, test, or concede a specific point>" } ],
-  "request_extra_round": <true only if this is the last scheduled round, the debate is still productive, and one more exchange would likely resolve a key dispute>
+  "request_extra_round": <true only if this is the last scheduled round, the debate is still productive, and one more exchange would likely resolve a key dispute>,
+  "stop_debate": <true only after round 1, when every remaining dispute is a judgment call or already ruled on and another revision is unlikely to move either seat; the report will present them as unresolved>
 }`;
 
 /** Human-readable schema descriptions embedded in prompts. */

@@ -30,6 +30,9 @@ export function progressLogger(quiet = false) {
             case "handoff":
                 log(yellow(`  ${e.label} ${e.from} unavailable during ${e.phase}; handed off to ${e.to}`));
                 break;
+            case "stalemate":
+                log(yellow(`  captain ${e.panelist} ended the debate after round ${e.round}: remaining disputes will not move; the report presents them as unresolved`));
+                break;
             case "extra-round":
                 log(yellow(`  captain ${e.panelist} granted one extra round after round ${e.round}`));
                 break;

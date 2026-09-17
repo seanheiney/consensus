@@ -92,3 +92,31 @@ describe("captain", () => {
     expect(none.judge.id).toBe("anthropic:claude-opus-5");
   });
 });
+
+describe("captain stalemate", () => {
+  it("ends the debate after a follow-up round when the captain sets stop_debate", async () => {
+    const { phaseOf, disagreeAll, revision } = await import("./fake.js");
+    const seat = (id: string) => ({
+      id, provider: id.split(":")[0]!, model: "m",
+      async complete(req: import("../src/types.js").CompletionRequest) {
+        const p = phaseOf(req);
+        const text = p === "critique" ? disagreeAll(req) : p === "revise" ? revision(`${id} revised`) : p === "synthesize" ? "# Answer\nok" : `${id} proposal`;
+        return { text, usage: { inputTokens: 1, outputTokens: 1 } };
+      },
+    });
+    let briefs = 0;
+    const captain = {
+      id: "cap:m", provider: "cap", model: "m",
+      async complete(req: import("../src/types.js").CompletionRequest) {
+        if (req.phase === "moderate") { briefs++; return { text: JSON.stringify({ settled: [], key_disputes: [], guidance: "", questions_for_seats: [], request_extra_round: false, stop_debate: briefs >= 2 }), usage: { inputTokens: 1, outputTokens: 1 } }; }
+        return { text: "# Answer\nreport", usage: { inputTokens: 1, outputTokens: 1 } };
+      },
+    };
+    const events: string[] = [];
+    const run = await new (await import("../src/protocol/engine.js")).ConsensusEngine({ panel: [seat("a:m"), seat("b:m")], captain, rounds: 5, onEvent: (e) => events.push(e.type) }).run("q");
+    expect(run.rounds).toHaveLength(2);
+    expect(run.converged).toBe(false);
+    expect(events).toContain("stalemate");
+    expect(run.synthesis).toContain("report");
+  });
+});

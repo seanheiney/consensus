@@ -108,6 +108,8 @@ export interface Moderation {
     }[];
     /** The captain may ask for one extra round beyond the profile's maximum when the debate is productive but unresolved. */
     request_extra_round?: boolean;
+    /** After round 1: the remaining disputes will not move, so skip further revision and write the report. */
+    stop_debate?: boolean;
 }
 export interface Revision {
     responses: {
@@ -215,6 +217,10 @@ export type ConsensusEvent = {
     moderation: Moderation;
 } | {
     type: "extra-round";
+    panelist: string;
+    round: number;
+} | {
+    type: "stalemate";
     panelist: string;
     round: number;
 } | {

@@ -222,6 +222,11 @@ export class ConsensusEngine {
         }
       }
       if (round === maxRounds) break;
+      if (round > 1 && moderation?.stop_debate) {
+        // The captain judged the remaining disputes irreducible: go straight to the report instead of another revision.
+        this.emit({ type: "stalemate", panelist: captain!.id, round });
+        break;
+      }
 
       this.emit({ type: "phase", phase: "revise", round });
       const revisions: Record<string, Revision> = {};

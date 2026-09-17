@@ -47,13 +47,19 @@ import { G, bold, dim, green, log, progressLogger, red, yellow } from "./progres
 import { preflight } from "./doctor.js";
 import { renderRunHtml } from "./store.js";
 import { materializePreset as _mp } from "./profiles.js";
-/** Rough wall-clock guess: per-phase latency scaled by effort, phases by rounds. */
-function estimateMinutes(seats, rounds, effort) {
-    const scale = effort === "max" ? 2 : effort === "xhigh" ? 1.6 : effort === "high" ? 1.2 : effort === "medium" ? 0.8 : 0.5;
-    const phases = 1 + rounds + (rounds > 1 ? rounds - 1 : 0) + 1; // propose, critiques, revisions, synthesis
-    const perPhaseSec = 30 * scale + seats * 3;
-    const total = phases * perPhaseSec;
-    return { low: Math.max(1, Math.round((total * 0.6) / 60)), high: Math.max(2, Math.round((total * 1.4) / 60)) };
+/**
+ * Rough wall-clock guess, calibrated on measured runs (ablation 2: two CLI seats at high effort on design
+ * questions averaged ~170 s per phase, ~80 s per captain brief). Low = the panel settles after round 2;
+ * high = every scheduled round runs.
+ */
+function estimateMinutes(seats, rounds, effort, captain = true) {
+    const scale = effort === "max" ? 1.8 : effort === "xhigh" ? 1.4 : effort === "high" ? 1 : effort === "medium" ? 0.55 : 0.3;
+    const perPhase = (170 + Math.max(0, seats - 2) * 15) * scale;
+    const perBrief = captain ? 80 * scale : 0;
+    const settled = Math.min(rounds, 2);
+    const lowSec = (1 + settled + (settled - 1) + 1) * perPhase + (settled - 1) * perBrief;
+    const highSec = (1 + rounds + Math.max(0, rounds - 1) + 1) * perPhase + rounds * perBrief;
+    return { low: Math.max(1, Math.round((lowSec * 0.7) / 60)), high: Math.max(2, Math.round((highSec * 1.2) / 60)) };
 }
 function levenshtein(a, b) {
     const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
@@ -99,7 +105,7 @@ program
     .argument("[prompt]", "the problem to solve ('-' or omitted reads stdin)")
     .option("-f, --file <path>", "read the prompt from a file")
     .option("-c, --context <path>", "extra context file (code, docs, constraints) appended to the problem")
-    .option("--profile <name>", "model profile to use (see `consensus profiles`)")
+    .option("-P, --profile <name>", "model profile to use (see `consensus profiles`)")
     .option("-p, --panel <specs>", "comma-separated panelists, e.g. claude,codex:gpt-5.6-sol,xai:grok-4.6#max")
     .option("--captain <spec|auto|neutral|none>", "captain: moderates after each critique round, referees disputes, facilitates, writes the report (default auto = best available model, even if a seat uses it, as a separate thread; neutral = prefer a vendor not on the panel)")
     .option("-j, --judge <spec>", "override who writes the synthesis: a seat spec or `external:<spec>` (default: the captain)")
@@ -164,9 +170,9 @@ program
         if (r.captain)
             log(dim(`captain: ${r.captain.id}${r.panel.some((x) => x.model === r.captain.model && x.provider === r.captain.provider) ? " (same model as a seat, separate thread)" : " (not on the panel)"}: moderates each round, referees disputes, may grant one extra round, writes the report`));
         const ceilings = [o.maxCost ?? cfg.maxCostUsd ? `billed ceiling $${o.maxCost ?? cfg.maxCostUsd}` : "", o.maxSpend ?? cfg.maxSpendUsd ? `total ceiling $${o.maxSpend ?? cfg.maxSpendUsd}` : ""].filter(Boolean).join(", ");
-        const est = estimateMinutes(r.panel.length, r.rounds, r.effort);
-        log(dim(`judge: ${r.judge.id}${onPanel ? "" : " (external, did not debate)"}  rounds: ${r.rounds}  cost: ${cliSeats === r.panel.length ? "subscription quota" : cliSeats ? "subscription quota + API tokens" : "API tokens"}; up to ${r.panel.length * (1 + 2 * r.rounds) + 1} model calls${ceilings ? `; ${ceilings}` : ""}`));
-        log(dim(`expect roughly ${est.low}–${est.high} minutes (seats run in parallel; each round adds a critique and, if anything is disputed, a revision)`));
+        const est = estimateMinutes(r.panel.length, r.rounds, r.effort, !!r.captain);
+        log(dim(`judge: ${r.judge.id}${onPanel ? "" : " (external, did not debate)"}  rounds: ${r.rounds}  cost: ${cliSeats === r.panel.length ? "subscription quota" : cliSeats ? "subscription quota + API tokens" : "API tokens"}; up to ${r.panel.length * (1 + 2 * r.rounds) + 1 + (r.captain ? r.rounds : 0)} model calls${ceilings ? `; ${ceilings}` : ""}`));
+        log(dim(`expect roughly ${est.low}–${est.high} minutes (seats run in parallel; each round adds a critique, a captain brief and, if anything is disputed, a revision; judgment questions at high effort take the longest)`));
     }
     const ac = new AbortController();
     process.once("SIGINT", () => {
