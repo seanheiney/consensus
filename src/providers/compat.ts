@@ -24,6 +24,21 @@ export interface CompatOptions extends ProviderFactoryOptions {
   baseURL: string;
   /** Send `reasoning_effort` (xAI, OpenRouter reasoning models). */
   reasoning?: boolean;
+  /** SDK retries on 429/5xx, honouring Retry-After (default 2). Groq's per-minute token limits need more. */
+  maxRetries?: number;
+}
+
+/** Whether a gateway model takes a reasoning effort knob, and which values. */
+function reasoningFor(provider: string, model: string, effort: "low" | "medium" | "high"): Record<string, unknown> | undefined {
+  if (provider === "openrouter") return { reasoning: { effort } };
+  if (provider === "xai") return /mini/.test(model) ? { reasoning_effort: effort } : undefined;
+  if (provider === "groq") {
+    // gpt-oss takes low/medium/high; Qwen 3.x takes "default"/"none"; other Groq models reject the field.
+    if (/gpt-oss/.test(model)) return { reasoning_effort: effort };
+    if (/qwen3/i.test(model)) return { reasoning_effort: "default", reasoning_format: "hidden" };
+    return undefined;
+  }
+  return { reasoning_effort: effort };
 }
 
 /**
@@ -31,7 +46,7 @@ export interface CompatOptions extends ProviderFactoryOptions {
  * Ollama, vLLM, LM Studio, etc.
  */
 export function createCompatPanelist(opts: CompatOptions): Panelist {
-  const client = new OpenAI({ apiKey: opts.apiKey ?? "not-needed", baseURL: opts.baseURL });
+  const client = new OpenAI({ apiKey: opts.apiKey ?? "not-needed", baseURL: opts.baseURL, ...(opts.maxRetries !== undefined ? { maxRetries: opts.maxRetries } : {}) });
   const model = opts.model;
 
   return {
@@ -40,20 +55,14 @@ export function createCompatPanelist(opts: CompatOptions): Panelist {
     model,
     effort: opts.effort,
     billing: "api",
-    effortApplied: (e) => (!opts.reasoning ? "ignored" : opts.provider === "xai" && !/mini/.test(model) ? "ignored" : EFFORT[e]),
+    effortApplied: (e) => {
+      if (!opts.reasoning) return "ignored";
+      const r = reasoningFor(opts.provider, model, EFFORT[e]);
+      return r ? String((r.reasoning_effort as string | undefined) ?? (r.reasoning as { effort: string }).effort) : "ignored";
+    },
     async complete(req: CompletionRequest): Promise<CompletionResult> {
       const effort = EFFORT[opts.effort ?? req.effort ?? "high"];
-      // Reasoning knobs differ per gateway: xAI accepts `reasoning_effort` only on its mini models,
-      // OpenRouter takes a `reasoning: { effort }` object, others get nothing.
-      const reasoningParams: Record<string, unknown> = !opts.reasoning
-        ? {}
-        : opts.provider === "openrouter"
-          ? { reasoning: { effort } }
-          : opts.provider === "xai"
-            ? /mini/.test(model)
-              ? { reasoning_effort: effort }
-              : {}
-            : { reasoning_effort: effort };
+      const reasoningParams: Record<string, unknown> = (opts.reasoning && reasoningFor(opts.provider, model, effort)) || {};
       const build = (structured: boolean): OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming => ({
         model,
         messages: [

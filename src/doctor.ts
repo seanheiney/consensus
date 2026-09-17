@@ -145,7 +145,7 @@ export function preflight(panel: Panelist[], statuses: VendorStatus[], env: Node
         if (m?.model.minCodex && versionLt(v.cli.version, m.model.minCodex)) problems.push(`${p.id}: needs Codex >= ${m.model.minCodex}, you have ${v.cli.version} (npm install -g @openai/codex@latest, or use codex:gpt-5.6-sol)`);
       }
     } else if (info.envKey && !env[info.envKey]) {
-      problems.push(`${p.id}: ${info.envKey} is not set (consensus connect ${info.vendor === "openrouter" ? "openrouter" : info.vendor})`);
+      problems.push(`${p.id}: ${info.envKey} is not set (consensus connect ${info.vendor === "other" ? p.provider : info.vendor})`);
     }
   }
   return problems;

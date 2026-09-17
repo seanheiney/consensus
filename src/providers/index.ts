@@ -125,6 +125,16 @@ export const PROVIDERS: Record<string, ProviderInfo> = {
     reasoning: true,
     description: "OpenRouter (any hosted model)",
   },
+  groq: {
+    name: "groq",
+    kind: "api",
+    vendor: "other",
+    envKey: "GROQ_API_KEY",
+    defaultModel: "openai/gpt-oss-120b",
+    baseURL: "https://api.groq.com/openai/v1",
+    reasoning: true,
+    description: "Groq (fast open-weight models; GROQ_BASE_URL points it at any Groq-backed OpenAI-compatible gateway)",
+  },
   ollama: {
     name: "ollama",
     kind: "api",
@@ -272,9 +282,10 @@ export function createPanelist(
         provider,
         model: model!,
         effort,
-        baseURL: parsed.baseURL ?? info.baseURL!,
+        baseURL: parsed.baseURL ?? (provider === "groq" ? env.GROQ_BASE_URL : undefined) ?? info.baseURL!,
         apiKey: info.envKey ? env[info.envKey] : undefined,
         reasoning: info.reasoning,
+        maxRetries: provider === "groq" ? 6 : undefined,
       });
     }
   }

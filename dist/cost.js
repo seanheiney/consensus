@@ -1,6 +1,11 @@
 /** Cost estimation shared by the engine (spend ceiling), CLI, MCP, and bench. */
 import { CATALOG } from "./catalog.js";
 import { parseSpec } from "./providers/index.js";
+/** Groq list prices per 1M tokens (console.groq.com/docs/models, checked 2026-09-17). Models priced "contact sales" are left out. */
+export const GROQ_PRICES = {
+    "openai/gpt-oss-120b": { input: 0.15, output: 0.6 },
+    "openai/gpt-oss-20b": { input: 0.075, output: 0.3 },
+};
 export function priceFor(panelistId) {
     const base = panelistId.split("+")[0];
     let model;
@@ -12,6 +17,8 @@ export function priceFor(panelistId) {
     }
     if (!model)
         return undefined; // CLI default model: unknown
+    if (base.startsWith("groq:") && GROQ_PRICES[model])
+        return GROQ_PRICES[model];
     for (const models of Object.values(CATALOG)) {
         const m = models.find((x) => x.id === model || x.openrouter === model);
         if (m && m.input !== undefined && m.output !== undefined)

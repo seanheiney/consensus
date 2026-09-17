@@ -36,6 +36,7 @@ export declare const PackSchema: z.ZodObject<{
             context: z.ZodOptional<z.ZodString>;
             expected: z.ZodOptional<z.ZodString>;
             rubric: z.ZodOptional<z.ZodString>;
+            final: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodArray<z.ZodString>]>>;
             tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
         }, z.core.$strip>>;
     }, z.core.$strip>>;

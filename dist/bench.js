@@ -19,6 +19,11 @@ export const BenchCaseSchema = z.object({
     expected: z.string().optional(),
     /** What a great answer must contain; guides the quality score. */
     rubric: z.string().optional(),
+    /**
+     * Machine-checkable answer(s). When set, accuracy is scored deterministically (10 or 0) from the answer's last
+     * "FINAL:" line instead of by the grader; any listed form counts. The grader still scores quality blind.
+     */
+    final: z.union([z.string(), z.array(z.string())]).optional(),
     tags: z.array(z.string()).optional(),
 });
 export const BenchSuiteSchema = z.object({
@@ -111,6 +116,19 @@ const GradeSchema = z.object({
  * Grading is two-phase so the reference answer cannot leak into the subjective
  * score: phase "quality" never sees the reference; phase "accuracy" does.
  */
+/** Normalize a final answer for exact comparison: case, whitespace, markdown emphasis, trailing punctuation. */
+export function normalizeFinal(x) {
+    return x.toLowerCase().replace(/[*_`]/g, "").replace(/\s+/g, "").replace(/[.;]+$/, "");
+}
+/** True when the answer's last "FINAL:" line matches any accepted form. */
+export function checkFinal(answer, accepted) {
+    const lines = [...answer.matchAll(/^\W*final\W*:\s*(.+)$/gim)];
+    const got = lines.at(-1)?.[1];
+    if (!got)
+        return false;
+    const forms = (Array.isArray(accepted) ? accepted : [accepted]).map(normalizeFinal);
+    return forms.includes(normalizeFinal(got));
+}
 export function gradePrompt(c, answers, phase = "accuracy") {
     const block = answers.map((a) => `### Answer ${a.label}\n\n${a.text.trim()}`).join("\n\n---\n\n");
     if (phase === "quality") {
@@ -231,7 +249,7 @@ async function runOne(target, c, o, trial) {
                     add(s.usage);
                 const merged = await target.single.complete({
                     system: sys,
-                    messages: [{ role: "user", content: `${plain}\n\nBelow are ${n} independent answers you produced to this question. Where they agree, keep it; where they disagree, decide which is right and why; produce the single best final answer, complete and usable on its own.\n\n${samples.map((s, i) => `### Answer ${i + 1}\n\n${s.text.trim()}`).join("\n\n---\n\n")}` }],
+                    messages: [{ role: "user", content: `${plain}\n\nBelow are ${n} independent answers you produced to this question. Where they agree, keep it; where they disagree, decide which is right and why; produce the single best final answer, complete and usable on its own, following any output format the question asks for.\n\n${samples.map((s, i) => `### Answer ${i + 1}\n\n${s.text.trim()}`).join("\n\n---\n\n")}` }],
                     effort: target.effort,
                     phase: "synthesize",
                 });
@@ -327,6 +345,11 @@ export async function gradeAll(suite, results, grader, seed, onEvent) {
         catch (err) {
             for (const r of rs)
                 r.notes = `grading failed: ${err.message.split("\n")[0]}`;
+        }
+        finally {
+            if (c.final !== undefined)
+                for (const r of rs)
+                    r.accuracy = checkFinal(answerSection(r.answer), c.final) ? 10 : 0;
         }
         onEvent?.({ type: "grade:done", caseId: c.id });
     }

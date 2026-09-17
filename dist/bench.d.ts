@@ -6,6 +6,7 @@ export declare const BenchCaseSchema: z.ZodObject<{
     context: z.ZodOptional<z.ZodString>;
     expected: z.ZodOptional<z.ZodString>;
     rubric: z.ZodOptional<z.ZodString>;
+    final: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodArray<z.ZodString>]>>;
     tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
 }, z.core.$strip>;
 export declare const BenchSuiteSchema: z.ZodObject<{
@@ -16,6 +17,7 @@ export declare const BenchSuiteSchema: z.ZodObject<{
         context: z.ZodOptional<z.ZodString>;
         expected: z.ZodOptional<z.ZodString>;
         rubric: z.ZodOptional<z.ZodString>;
+        final: z.ZodOptional<z.ZodUnion<readonly [z.ZodString, z.ZodArray<z.ZodString>]>>;
         tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
@@ -89,6 +91,10 @@ export { estimateCost, priceFor } from "./cost.js";
  * Grading is two-phase so the reference answer cannot leak into the subjective
  * score: phase "quality" never sees the reference; phase "accuracy" does.
  */
+/** Normalize a final answer for exact comparison: case, whitespace, markdown emphasis, trailing punctuation. */
+export declare function normalizeFinal(x: string): string;
+/** True when the answer's last "FINAL:" line matches any accepted form. */
+export declare function checkFinal(answer: string, accepted: string | string[]): boolean;
 export declare function gradePrompt(c: BenchCase, answers: {
     label: string;
     text: string;

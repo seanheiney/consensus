@@ -1,4 +1,9 @@
 import type { Usage } from "./types.js";
+/** Groq list prices per 1M tokens (console.groq.com/docs/models, checked 2026-09-17). Models priced "contact sales" are left out. */
+export declare const GROQ_PRICES: Record<string, {
+    input: number;
+    output: number;
+}>;
 export declare function priceFor(panelistId: string): {
     input: number;
     output: number;

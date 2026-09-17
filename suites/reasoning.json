@@ -1,0 +1,164 @@
+{
+  "name": "reasoning",
+  "description": "Objective problems with machine-checked answers. Every reference was verified by brute force or by running the code (Python 3, Node 22, SQLite). Accuracy is exact-match on the FINAL line; the grader scores quality blind.",
+  "cases": [
+    {
+      "id": "digit-sum",
+      "tags": [
+        "objective"
+      ],
+      "prompt": "How many integers n with 1 <= n <= 1,000,000 have decimal digits that sum to exactly 27?\n\nWork it out carefully. End your answer with exactly one line of the form:\nFINAL: <answer>",
+      "expected": "55252",
+      "final": [
+        "55252",
+        "55,252"
+      ]
+    },
+    {
+      "id": "dice-range",
+      "tags": [
+        "objective"
+      ],
+      "prompt": "Four fair six-sided dice are rolled. What is the probability that the largest value minus the smallest value is exactly 3? Give the answer as a reduced fraction.\n\nWork it out carefully. End your answer with exactly one line of the form:\nFINAL: <answer>",
+      "expected": "55/216",
+      "final": [
+        "55/216"
+      ]
+    },
+    {
+      "id": "js-parseint",
+      "tags": [
+        "objective"
+      ],
+      "prompt": "What does this JavaScript expression evaluate to? Write the resulting array exactly as Node.js prints it.\n\n[\"7\", \"11\", \"12\", \"13\"].map(parseInt)\n\nWork it out carefully. End your answer with exactly one line of the form:\nFINAL: <answer>",
+      "expected": "[ 7, NaN, 1, 1 ]",
+      "final": [
+        "[7, NaN, 1, 1]",
+        "[7,NaN,1,1]"
+      ]
+    },
+    {
+      "id": "js-round-sum",
+      "tags": [
+        "objective"
+      ],
+      "prompt": "In JavaScript, what is the value of:\n\n[-2.5, -1.5, -0.5, 0.5, 1.5, 2.5].map(Math.round).reduce((a, b) => a + b, 0)\n\nWork it out carefully. End your answer with exactly one line of the form:\nFINAL: <answer>",
+      "expected": "3",
+      "final": [
+        "3"
+      ]
+    },
+    {
+      "id": "py-late-binding",
+      "tags": [
+        "objective"
+      ],
+      "prompt": "What does this Python 3 program print?\n\nfs = [lambda: i for i in range(3)]\nprint([f() for f in fs])\n\nWork it out carefully. End your answer with exactly one line of the form:\nFINAL: <answer>",
+      "expected": "[2, 2, 2]",
+      "final": [
+        "[2, 2, 2]",
+        "[2,2,2]"
+      ]
+    },
+    {
+      "id": "sql-not-in",
+      "tags": [
+        "objective"
+      ],
+      "prompt": "In standard SQL (e.g. PostgreSQL or SQLite), table t has one integer column x with four rows: 1, NULL, 2, 3. What does this query return?\n\nSELECT COUNT(*) FROM t WHERE x NOT IN (SELECT x FROM t WHERE x IS NULL OR x > 2);\n\nWork it out carefully. End your answer with exactly one line of the form:\nFINAL: <answer>",
+      "expected": "0",
+      "final": [
+        "0"
+      ]
+    },
+    {
+      "id": "sql-not-exists",
+      "tags": [
+        "objective"
+      ],
+      "prompt": "Same table t (one integer column x; rows 1, NULL, 2, 3). What does this query return?\n\nSELECT COUNT(*) FROM t a WHERE NOT EXISTS (SELECT 1 FROM t b WHERE (b.x IS NULL OR b.x > 2) AND b.x = a.x);\n\nWork it out carefully. End your answer with exactly one line of the form:\nFINAL: <answer>",
+      "expected": "3",
+      "final": [
+        "3"
+      ]
+    },
+    {
+      "id": "weekday",
+      "tags": [
+        "objective"
+      ],
+      "prompt": "What day of the week is July 4, 2031 in the Gregorian calendar?\n\nWork it out carefully. End your answer with exactly one line of the form:\nFINAL: <answer>",
+      "expected": "Friday",
+      "final": [
+        "Friday"
+      ]
+    },
+    {
+      "id": "domino-3x8",
+      "tags": [
+        "objective"
+      ],
+      "prompt": "In how many ways can a 3 by 8 rectangle be tiled completely with 1 by 2 dominoes (dominoes may be placed horizontally or vertically)?\n\nWork it out carefully. End your answer with exactly one line of the form:\nFINAL: <answer>",
+      "expected": "153",
+      "final": [
+        "153"
+      ]
+    },
+    {
+      "id": "double-six",
+      "tags": [
+        "objective"
+      ],
+      "prompt": "A fair six-sided die is rolled repeatedly until two sixes appear on consecutive rolls. What is the expected total number of rolls?\n\nWork it out carefully. End your answer with exactly one line of the form:\nFINAL: <answer>",
+      "expected": "42",
+      "final": [
+        "42"
+      ]
+    },
+    {
+      "id": "no-adjacent-bits",
+      "tags": [
+        "objective"
+      ],
+      "prompt": "How many integers n with 1 <= n < 65536 have no two adjacent 1 bits in their binary representation?\n\nWork it out carefully. End your answer with exactly one line of the form:\nFINAL: <answer>",
+      "expected": "2583",
+      "final": [
+        "2583",
+        "2,583"
+      ]
+    },
+    {
+      "id": "harmonic-loop",
+      "tags": [
+        "objective"
+      ],
+      "prompt": "How many times does the body of the inner loop run?\n\nfor (let i = 1; i <= 100; i++) {\n  for (let j = i; j <= 100; j += i) {\n    body();\n  }\n}\n\nWork it out carefully. End your answer with exactly one line of the form:\nFINAL: <answer>",
+      "expected": "482",
+      "final": [
+        "482"
+      ]
+    },
+    {
+      "id": "birthday-75",
+      "tags": [
+        "objective"
+      ],
+      "prompt": "Assume 365 equally likely birthdays and ignore leap years. What is the smallest number of people for which the probability that at least two share a birthday exceeds 75%?\n\nWork it out carefully. End your answer with exactly one line of the form:\nFINAL: <answer>",
+      "expected": "32",
+      "final": [
+        "32"
+      ]
+    },
+    {
+      "id": "race-min",
+      "tags": [
+        "objective"
+      ],
+      "prompt": "A shared integer x starts at 0. Two threads each run `x = x + 1` three times, where each increment is two separate steps: read x into a local variable, then write local + 1 back to x. The scheduler may interleave these steps in any order. What is the smallest possible final value of x?\n\nWork it out carefully. End your answer with exactly one line of the form:\nFINAL: <answer>",
+      "expected": "2",
+      "final": [
+        "2"
+      ]
+    }
+  ]
+}

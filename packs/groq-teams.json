@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "name": "groq-teams",
+  "version": "0.1.0",
+  "description": "Teams of cheap open-weight models on Groq, each seat scoped to a different angle on the same problem, plus the controls needed to tell whether the personas or the debate are doing the work.",
+  "author": "consensus maintainers",
+  "personas": {
+    "enumerator": "Solve by explicit computation rather than intuition: enumerate small cases, trace the code line by line, simulate the process, or count directly. Show the enumeration or trace compactly, then generalize only what the computation supports.",
+    "alternate-method": "Solve the problem with a different method from the one most people would reach for first (for example a complementary count, an invariant, a recurrence, or reasoning from the specification instead of from memory). Then compare your result with the obvious method and resolve any mismatch explicitly.",
+    "independent": "Answer the problem as a careful expert. Take no particular angle."
+  },
+  "profiles": {
+    "groq-angles": {
+      "description": "Five gpt-oss-120b seats on Groq, each with a different angle; gpt-oss-120b captain. All-cheap.",
+      "panel": [
+        "groq:openai/gpt-oss-120b#high+first-principles",
+        "groq:openai/gpt-oss-120b#high+skeptic",
+        "groq:openai/gpt-oss-120b#high+pragmatist",
+        "groq:openai/gpt-oss-120b#high+enumerator",
+        "groq:openai/gpt-oss-120b#high+alternate-method"
+      ],
+      "captain": "groq:openai/gpt-oss-120b#high",
+      "rounds": 2
+    },
+    "groq-plain": {
+      "description": "Control: the same five gpt-oss-120b seats and captain with no angle, to isolate what the personas add.",
+      "panel": [
+        "groq:openai/gpt-oss-120b#high+independent",
+        "groq:openai/gpt-oss-120b#high+independent-2",
+        "groq:openai/gpt-oss-120b#high+independent-3",
+        "groq:openai/gpt-oss-120b#high+independent-4",
+        "groq:openai/gpt-oss-120b#high+independent-5"
+      ],
+      "captain": "groq:openai/gpt-oss-120b#high",
+      "rounds": 2
+    },
+    "groq-angles-small": {
+      "description": "Cheaper still: two gpt-oss-120b and three gpt-oss-20b seats with the same five angles; gpt-oss-120b captain.",
+      "panel": [
+        "groq:openai/gpt-oss-120b#high+first-principles",
+        "groq:openai/gpt-oss-120b#high+skeptic",
+        "groq:openai/gpt-oss-20b#high+pragmatist",
+        "groq:openai/gpt-oss-20b#high+enumerator",
+        "groq:openai/gpt-oss-20b#high+alternate-method"
+      ],
+      "captain": "groq:openai/gpt-oss-120b#high",
+      "rounds": 2
+    },
+    "groq-angles-frontier-captain": {
+      "description": "Hybrid: the groq-angles team argues, a frontier model moderates and writes the report.",
+      "panel": [
+        "groq:openai/gpt-oss-120b#high+first-principles",
+        "groq:openai/gpt-oss-120b#high+skeptic",
+        "groq:openai/gpt-oss-120b#high+pragmatist",
+        "groq:openai/gpt-oss-120b#high+enumerator",
+        "groq:openai/gpt-oss-120b#high+alternate-method"
+      ],
+      "captain": "any:claude-opus-5#high",
+      "rounds": 2
+    }
+  }
+}

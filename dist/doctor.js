@@ -113,7 +113,7 @@ export function preflight(panel, statuses, env = process.env) {
             }
         }
         else if (info.envKey && !env[info.envKey]) {
-            problems.push(`${p.id}: ${info.envKey} is not set (consensus connect ${info.vendor === "openrouter" ? "openrouter" : info.vendor})`);
+            problems.push(`${p.id}: ${info.envKey} is not set (consensus connect ${info.vendor === "other" ? p.provider : info.vendor})`);
         }
     }
     return problems;

@@ -5,11 +5,11 @@ import { readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { CATALOG, CATALOG_VENDORS, directRouteBlocker, priceLabel, routeFor } from "./catalog.js";
 import { loadConfig, loadUserConfig, resolveRun, saveUserConfig } from "./config.js";
-import { credentialEnv, loadCredentials } from "./credentials.js";
+import { credentialEnv, loadCredentials, saveCredential } from "./credentials.js";
 import { createPack, describePack, diffPack, installPack, readPack, removePack } from "./packs.js";
 import { configWarnings, splitMember } from "./config.js";
 import { ensureGitignore } from "./hosts.js";
-import { describeCost, estimateCost } from "./cost.js";
+import { GROQ_PRICES, describeCost, estimateCost } from "./cost.js";
 import { setDefaultTimeout } from "./providers/cli.js";
 import { probeSpecs, scanVendors } from "./doctor.js";
 import { installProjectMcp, installProjectSkills, listHosts, mcpLaunchCommand } from "./hosts.js";
@@ -52,14 +52,15 @@ import { materializePreset as _mp } from "./profiles.js";
  * questions averaged ~170 s per phase, ~80 s per captain brief). Low = the panel settles after round 2;
  * high = every scheduled round runs.
  */
-function estimateMinutes(seats, rounds, effort, captain = true) {
-    const scale = effort === "max" ? 1.8 : effort === "xhigh" ? 1.4 : effort === "high" ? 1 : effort === "medium" ? 0.55 : 0.3;
+function estimateMinutes(seats, rounds, effort, captain = true, fastInference = false) {
+    // Groq-class inference serves open-weight models at hundreds of tokens per second: phases take seconds, not minutes.
+    const scale = (effort === "max" ? 1.8 : effort === "xhigh" ? 1.4 : effort === "high" ? 1 : effort === "medium" ? 0.55 : 0.3) * (fastInference ? 0.1 : 1);
     const perPhase = (170 + Math.max(0, seats - 2) * 15) * scale;
     const perBrief = captain ? 80 * scale : 0;
     const settled = Math.min(rounds, 2);
     const lowSec = (1 + settled + (settled - 1) + 1) * perPhase + (settled - 1) * perBrief;
     const highSec = (1 + rounds + Math.max(0, rounds - 1) + 1) * perPhase + rounds * perBrief;
-    return { low: Math.max(1, Math.round((lowSec * 0.7) / 60)), high: Math.max(2, Math.round((highSec * 1.2) / 60)) };
+    return { low: Math.max(1, Math.round((lowSec * 0.7) / 60)), high: Math.max(fastInference ? 1 : 2, Math.round((highSec * 1.2) / 60)) };
 }
 function levenshtein(a, b) {
     const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
@@ -170,9 +171,10 @@ program
         if (r.captain)
             log(dim(`captain: ${r.captain.id}${r.panel.some((x) => x.model === r.captain.model && x.provider === r.captain.provider) ? " (same model as a seat, separate thread)" : " (not on the panel)"}: moderates each round, referees disputes, may grant one extra round, writes the report`));
         const ceilings = [o.maxCost ?? cfg.maxCostUsd ? `billed ceiling $${o.maxCost ?? cfg.maxCostUsd}` : "", o.maxSpend ?? cfg.maxSpendUsd ? `total ceiling $${o.maxSpend ?? cfg.maxSpendUsd}` : ""].filter(Boolean).join(", ");
-        const est = estimateMinutes(r.panel.length, r.rounds, r.effort, !!r.captain);
+        const fast = [...r.panel, ...(r.captain ? [r.captain] : [])].every((x) => x.provider === "groq");
+        const est = estimateMinutes(r.panel.length, r.rounds, r.effort, !!r.captain, fast);
         log(dim(`judge: ${r.judge.id}${onPanel ? "" : " (external, did not debate)"}  rounds: ${r.rounds}  cost: ${cliSeats === r.panel.length ? "subscription quota" : cliSeats ? "subscription quota + API tokens" : "API tokens"}; up to ${r.panel.length * (1 + 2 * r.rounds) + 1 + (r.captain ? r.rounds : 0)} model calls${ceilings ? `; ${ceilings}` : ""}`));
-        log(dim(`expect roughly ${est.low}–${est.high} minutes (seats run in parallel; each round adds a critique, a captain brief and, if anything is disputed, a revision; judgment questions at high effort take the longest)`));
+        log(dim(`expect roughly ${est.low === est.high ? `${est.low}` : `${est.low}–${est.high}`} minute${est.high === 1 ? "" : "s"} (seats run in parallel; each round adds a critique, a captain brief and, if anything is disputed, a revision; judgment questions at high effort take the longest)`));
     }
     const ac = new AbortController();
     process.once("SIGINT", () => {
@@ -353,9 +355,11 @@ program
 });
 program
     .command("connect")
-    .argument("<vendor>", `one of: ${VENDORS.map((v) => v.vendor).join(", ")}`)
+    .argument("<vendor>", `one of: ${VENDORS.map((v) => v.vendor).join(", ")}, groq`)
     .description("log in to one vendor's CLI or store its API key")
     .action(async (vendor) => {
+    if (vendor === "groq")
+        return connectGroq();
     const v = VENDORS.find((x) => x.vendor === vendor || x.cli === vendor || x.api === vendor);
     if (!v)
         throw new Error(`Unknown vendor "${vendor}"`);
@@ -365,6 +369,46 @@ program
     const after = (await scanVendors(credentialEnv())).find((s) => s.vendor === v.vendor);
     p.outro(statusLine(after));
 });
+/** Live model ids from Groq (or a Groq-backed gateway at GROQ_BASE_URL). */
+async function groqModels(env) {
+    const { default: OpenAI } = await import("openai");
+    const client = new OpenAI({ apiKey: env.GROQ_API_KEY, baseURL: env.GROQ_BASE_URL ?? PROVIDERS.groq.baseURL });
+    const ids = [];
+    for await (const m of client.models.list())
+        ids.push(m.id);
+    return ids.sort();
+}
+async function connectGroq() {
+    p.intro("connect Groq");
+    const env = credentialEnv();
+    let key = env.GROQ_API_KEY;
+    if (!key) {
+        const v = await p.password({ message: "GROQ_API_KEY (console.groq.com/keys, or your gateway's key)" });
+        if (p.isCancel(v) || !v)
+            return void p.cancel("cancelled");
+        key = v;
+    }
+    const base = await p.text({ message: "Base URL (Enter for Groq itself; set this to use a Groq-backed OpenAI-compatible gateway)", placeholder: PROVIDERS.groq.baseURL, defaultValue: env.GROQ_BASE_URL ?? PROVIDERS.groq.baseURL });
+    if (p.isCancel(base))
+        return void p.cancel("cancelled");
+    const trial = { ...env, GROQ_API_KEY: key, GROQ_BASE_URL: base || PROVIDERS.groq.baseURL };
+    const spin = p.spinner();
+    spin.start("listing models");
+    try {
+        const ids = await groqModels(trial);
+        spin.stop(`${ids.length} model(s) available`);
+        await saveCredential("GROQ_API_KEY", key);
+        if (base && base !== PROVIDERS.groq.baseURL)
+            await saveCredential("GROQ_BASE_URL", base);
+        p.note(ids.map((id) => `groq:${id}`).join("\n"), "Seat any of these");
+        p.outro("Groq connected. Try: consensus -p groq:openai/gpt-oss-120b+skeptic,groq:openai/gpt-oss-120b+pragmatist \"...\"");
+    }
+    catch (err) {
+        spin.stop("could not list models");
+        p.outro(red(`Not saved: ${err.message.split("\n")[0]}`));
+        process.exitCode = 1;
+    }
+}
 // ---- profiles --------------------------------------------------------------
 program
     .command("profiles")
@@ -953,8 +997,21 @@ program
 // ---- models ---------------------------------------------------------------
 program
     .command("models")
+    .argument("[live]", "`groq`: list the models your Groq key (or GROQ_BASE_URL gateway) can seat right now")
     .description("list known models with prices, and how each vendor is connected")
-    .action(async () => {
+    .action(async (live) => {
+    if (live === "groq") {
+        const env = credentialEnv();
+        if (!env.GROQ_API_KEY)
+            throw new Error("No GROQ_API_KEY. Run `consensus connect groq` or export GROQ_API_KEY.");
+        for (const id of await groqModels(env)) {
+            const price = GROQ_PRICES[id];
+            log(`groq:${id}${price ? dim(`  $${price.input}/$${price.output} per 1M in/out`) : dim("  (no list price recorded)")}`);
+        }
+        return;
+    }
+    if (live)
+        throw new Error(`Unknown live listing "${live}". Supported: groq`);
     const statuses = await scanVendors(credentialEnv());
     const or = statuses.find((x) => x.vendor === "openrouter");
     for (const vendor of CATALOG_VENDORS) {

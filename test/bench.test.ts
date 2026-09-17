@@ -114,3 +114,13 @@ describe("bench resume", () => {
     expect(report.results.every((r) => r.quality === 7)).toBe(true);
   });
 });
+
+describe("machine-checked finals", () => {
+  it("matches the last FINAL line against any accepted form, ignoring case, spaces and emphasis", async () => {
+    const { checkFinal } = await import("../src/bench.js");
+    expect(checkFinal("work...\nFINAL: 55,252", ["55252", "55,252"])).toBe(true);
+    expect(checkFinal("**FINAL:** [7, NaN, 1, 1]", "[7,NaN,1,1]")).toBe(true);
+    expect(checkFinal("FINAL: 3\nactually\nFINAL: 4", "3")).toBe(false);
+    expect(checkFinal("The answer is 42.", "42")).toBe(false);
+  });
+});
