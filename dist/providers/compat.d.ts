@@ -7,6 +7,8 @@ export interface CompatOptions extends ProviderFactoryOptions {
     reasoning?: boolean;
     /** SDK retries on 429/5xx, honouring Retry-After (default 2). Groq's per-minute token limits need more. */
     maxRetries?: number;
+    /** The model's max completion tokens, when lower than what we would ask for. */
+    maxOutput?: number;
 }
 /**
  * Any OpenAI-compatible chat-completions endpoint: xAI (Grok), OpenRouter,

@@ -121,3 +121,17 @@ describe("portable judge", () => {
     expect(r.judge.id).toBe("anthropic:claude-sonnet-5+teacher");
   });
 });
+
+describe("pack upgrade", () => {
+  it("re-adding an installed pack replaces what it installed instead of duplicating it", async () => {
+    const { installPack, removePack } = await import("../src/packs.js");
+    const v1 = { schemaVersion: 1 as const, name: "t", version: "0.1.0", personas: { angle: "old" }, profiles: { a: { panel: ["claude:x", "codex:y"] }, gone: { panel: ["claude:x", "codex:y"] } } };
+    const v2 = { ...v1, version: "0.2.0", personas: { angle: "new" }, profiles: { a: { panel: ["claude:x", "codex:z"] }, added: { panel: ["claude:x", "codex:y"] } } };
+    const cfg1 = installPack({ profiles: { mine: { panel: ["claude:x", "codex:y"] } } }, v1 as never, "f").cfg;
+    const cfg2 = installPack(removePack(cfg1, "t"), v2 as never, "f").cfg;
+    expect(Object.keys(cfg2.profiles!).sort()).toEqual(["a", "added", "mine"]);
+    expect(cfg2.profiles!.a!.panel).toEqual(["claude:x", "codex:z"]);
+    expect(cfg2.personas!.angle).toBe("new");
+    expect(cfg2.packs!.t!.version).toBe("0.2.0");
+  });
+});

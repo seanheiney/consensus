@@ -57,7 +57,7 @@ export function createCompatPanelist(opts) {
                     { role: "system", content: req.system },
                     ...req.messages.map((m) => ({ role: m.role, content: m.content })),
                 ],
-                max_completion_tokens: req.maxTokens ?? 32000,
+                max_completion_tokens: Math.min(req.maxTokens ?? 32000, opts.maxOutput ?? Number.POSITIVE_INFINITY),
                 ...reasoningParams,
                 ...(req.json
                     ? structured && req.jsonSchema

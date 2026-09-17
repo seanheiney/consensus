@@ -11,12 +11,12 @@ Status: plan and tooling ready (`packs/groq-teams.json`, `suites/reasoning.json`
 | `groq-angles` | 5 × gpt-oss-120b, angles: first-principles, skeptic, pragmatist, enumerator, alternate-method; gpt-oss-120b captain; 2 rounds | The headline cheap team |
 | `groq-plain` | Same 5 seats and captain, no angle | What the angles add over a plain debate |
 | `groq-angles-small` | Same angles on 2 × gpt-oss-120b + 3 × gpt-oss-20b | How cheap the team can get |
+| `groq-angles-mixed` | Same angles across gpt-oss-120b, Qwen 3.8 27B (Groq preview) and gpt-oss-20b | Whether model diversity helps beyond prompt diversity |
 | `selfx5:groq:openai/gpt-oss-120b` | gpt-oss-120b answers 5 times, then merges its own best, no debate | What the debate adds over matched sampling |
-| `single:groq:openai/gpt-oss-120b`, `single:groq:openai/gpt-oss-20b` | One answer | The floor |
-| `single:claude:claude-fable-5-1`, `single:claude:claude-opus-5`, `single:codex:gpt-5.6-sol` | A frontier model alone, one answer | The bar to beat |
-| `groq-angles-frontier-captain` (optional, `HYBRID=1`) | The cheap team argues, Opus 5 moderates and writes the report | Whether a frontier referee is worth paying for |
+| `single:groq:…` for gpt-oss-120b, gpt-oss-20b, Qwen 3.8 27B | One answer | The floor |
+| `single:claude:claude-fable-5-1`, `single:claude:claude-opus-5`, `single:codex:gpt-6-astra`, `single:codex:gpt-5.6-sol` | A frontier model alone, one answer | The bar to beat |
 
-GPT-6 Astra is left out because it needs Codex CLI 0.154 or newer and this machine has 0.148; upgrade Codex and add `codex:gpt-6-astra` to the baselines to include it.
+Every team is moderated and reported by a Groq captain (gpt-oss-120b), so no frontier model touches a team's answer. MiniMax M2.7 is Groq enterprise-only and is left out.
 
 ## Suites and scoring
 
@@ -34,7 +34,7 @@ GPT-6 Astra is left out because it needs Codex CLI 0.154 or newer and this machi
 
 ## Expected cost and time
 
-Rough, before measurement: a Groq team debate is about 20–30 calls. Objective cases run around $0.05–0.10 per debate, judgment cases $0.15–0.25, so the full run is on the order of **$25 of Groq usage**. Frontier singles are about 60 Fable, 60 Opus and 60 Sol calls against subscription quota (plus about 170 Opus captain calls with `HYBRID=1`). Groq phases take seconds; the frontier CLI calls dominate wall time.
+Rough, before measurement: a Groq team debate is about 20–30 calls. Objective cases run around $0.05–0.10 per debate, judgment cases $0.15–0.25, so the full run is on the order of **$25 of Groq usage**. Frontier singles are about 60 calls each to Fable, Opus, Astra and Sol against subscription quota. Qwen 3.8 27B costs more per token than gpt-oss ($0.80/$4.00 per 1M), so the mixed team costs roughly twice the gpt-oss team. Groq phases take seconds; the frontier CLI calls dominate wall time.
 
 ## Run it
 

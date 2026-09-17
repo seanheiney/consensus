@@ -5,6 +5,7 @@ import { parseSpec } from "./providers/index.js";
 export const GROQ_PRICES = {
     "openai/gpt-oss-120b": { input: 0.15, output: 0.6 },
     "openai/gpt-oss-20b": { input: 0.075, output: 0.3 },
+    "qwen/qwen3.8-27b": { input: 0.8, output: 4 },
 };
 export function priceFor(panelistId) {
     const base = panelistId.split("+")[0];

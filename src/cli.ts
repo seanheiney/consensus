@@ -957,7 +957,11 @@ pack
       throw new Error(`No pack at "${source}". Give a file path, a URL, owner/repo, or one of the shipped packs (consensus pack list).`);
     }
     const { pack: pk, from } = await readPack(resolved);
-    const d = diffPack(cfg, pk);
+    // Re-adding an installed pack upgrades it: its own previous profiles and personas are replaced, not duplicated.
+    const prior = cfg.packs?.[pk.name];
+    const base = prior ? removePack(cfg, pk.name) : cfg;
+    if (prior) log(yellow(`upgrading ${pk.name} v${prior.version ?? "?"} -> v${pk.version}: replaces the ${prior.profiles.length} profile(s) and ${prior.personas.length} persona(s) it installed (local edits to them are lost)`));
+    const d = diffPack(base, pk);
     log(describePack(pk, from));
     log("");
     log(`installs ${d.newProfiles.length + d.conflictingProfiles.length} profile(s), ${d.newPersonas.length + d.conflictingPersonas.length} persona(s)${d.suiteCases ? `, a ${d.suiteCases}-case bench suite` : ""}`);
@@ -967,7 +971,7 @@ pack
       const ok = await p.confirm({ message: "Install this pack?", initialValue: true });
       if (p.isCancel(ok) || !ok) return log("not installed");
     }
-    const r = installPack(cfg, pk, from, { force: o.force });
+    const r = installPack(base, pk, from, { force: o.force });
     await saveUserConfig(r.cfg);
     log(`${green(G.ok)} installed ${pk.name}: profiles ${r.installedProfiles.join(", ")}${r.installedPersonas.length ? `; personas ${r.installedPersonas.join(", ")}` : ""}`);
     if (pk.suite) {

@@ -26,6 +26,8 @@ export interface CompatOptions extends ProviderFactoryOptions {
   reasoning?: boolean;
   /** SDK retries on 429/5xx, honouring Retry-After (default 2). Groq's per-minute token limits need more. */
   maxRetries?: number;
+  /** The model's max completion tokens, when lower than what we would ask for. */
+  maxOutput?: number;
 }
 
 /** Whether a gateway model takes a reasoning effort knob, and which values. */
@@ -69,7 +71,7 @@ export function createCompatPanelist(opts: CompatOptions): Panelist {
           { role: "system", content: req.system },
           ...req.messages.map((m) => ({ role: m.role, content: m.content })),
         ],
-        max_completion_tokens: req.maxTokens ?? 32000,
+        max_completion_tokens: Math.min(req.maxTokens ?? 32000, opts.maxOutput ?? Number.POSITIVE_INFINITY),
         ...(reasoningParams as object),
         ...(req.json
           ? structured && req.jsonSchema

@@ -248,6 +248,9 @@ export function formatSpec(p: ParsedSpec): string {
   return specId(p) + (p.effort ? `#${p.effort}` : "");
 }
 
+/** Groq models whose max completion tokens is below our default request (console.groq.com/docs/models, 2026-09-17). */
+const GROQ_MAX_OUTPUT: Record<string, number> = { "qwen/qwen3.8-27b": 16384 };
+
 export function createPanelist(
   spec: string | ParsedSpec,
   opts: { effort?: Effort; env?: NodeJS.ProcessEnv } = {},
@@ -286,6 +289,7 @@ export function createPanelist(
         apiKey: info.envKey ? env[info.envKey] : undefined,
         reasoning: info.reasoning,
         maxRetries: provider === "groq" ? 6 : undefined,
+        maxOutput: provider === "groq" ? GROQ_MAX_OUTPUT[model!] : undefined,
       });
     }
   }

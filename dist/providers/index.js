@@ -209,6 +209,8 @@ export function specId(p) {
 export function formatSpec(p) {
     return specId(p) + (p.effort ? `#${p.effort}` : "");
 }
+/** Groq models whose max completion tokens is below our default request (console.groq.com/docs/models, 2026-09-17). */
+const GROQ_MAX_OUTPUT = { "qwen/qwen3.8-27b": 16384 };
 export function createPanelist(spec, opts = {}) {
     const parsed = typeof spec === "string" ? parseSpec(spec) : spec;
     const env = opts.env ?? process.env;
@@ -243,6 +245,7 @@ export function createPanelist(spec, opts = {}) {
                 apiKey: info.envKey ? env[info.envKey] : undefined,
                 reasoning: info.reasoning,
                 maxRetries: provider === "groq" ? 6 : undefined,
+                maxOutput: provider === "groq" ? GROQ_MAX_OUTPUT[model] : undefined,
             });
         }
     }

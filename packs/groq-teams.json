@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "name": "groq-teams",
   "version": "0.1.0",
-  "description": "Teams of cheap open-weight models on Groq, each seat scoped to a different angle on the same problem, plus the controls needed to tell whether the personas or the debate are doing the work.",
+  "description": "Teams of cheap open-weight models on Groq, each seat scoped to a different angle on the same problem, with a Groq captain, plus the controls needed to tell whether the personas or the debate are doing the work.",
   "author": "consensus maintainers",
   "personas": {
     "enumerator": "Solve by explicit computation rather than intuition: enumerate small cases, trace the code line by line, simulate the process, or count directly. Show the enumeration or trace compactly, then generalize only what the computation supports.",
@@ -46,16 +46,16 @@
       "captain": "groq:openai/gpt-oss-120b#high",
       "rounds": 2
     },
-    "groq-angles-frontier-captain": {
-      "description": "Hybrid: the groq-angles team argues, a frontier model moderates and writes the report.",
+    "groq-angles-mixed": {
+      "description": "Model diversity: the same five angles split across gpt-oss-120b, Qwen 3.8 27B (preview) and gpt-oss-20b; gpt-oss-120b captain.",
       "panel": [
         "groq:openai/gpt-oss-120b#high+first-principles",
-        "groq:openai/gpt-oss-120b#high+skeptic",
+        "groq:qwen/qwen3.8-27b#high+skeptic",
         "groq:openai/gpt-oss-120b#high+pragmatist",
-        "groq:openai/gpt-oss-120b#high+enumerator",
-        "groq:openai/gpt-oss-120b#high+alternate-method"
+        "groq:qwen/qwen3.8-27b#high+enumerator",
+        "groq:openai/gpt-oss-20b#high+alternate-method"
       ],
-      "captain": "any:claude-opus-5#high",
+      "captain": "groq:openai/gpt-oss-120b#high",
       "rounds": 2
     }
   }

@@ -163,7 +163,7 @@ export function describePack(pack, from) {
         lines.push(`  profile ${n}${p.description ? `: ${p.description}` : ""}`);
         for (const m of p.panel)
             lines.push(`      ${typeof m === "string" ? m : `${m.model}+${m.name ?? "custom"}`}`);
-        lines.push(`      judge ${p.judge ?? "first seat"}, rounds ${p.rounds ?? 3}${p.effort ? `, effort ${p.effort}` : ""}`);
+        lines.push(`      captain ${p.captain ?? "auto"}${p.judge ? `, judge ${p.judge}` : ""}, rounds ${p.rounds ?? 3}${p.effort ? `, effort ${p.effort}` : ""}`);
     }
     for (const [n, t] of Object.entries(pack.personas))
         lines.push(`  persona ${n}:\n      ${t.replace(/\n/g, "\n      ")}`);

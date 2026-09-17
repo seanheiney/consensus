@@ -6,15 +6,14 @@
 #   consensus pack add ./packs/groq-teams.json
 #   sh scripts/bench-groq-vs-frontier.sh [objective|judgment|all]
 #
-# Env: TRIALS_OBJECTIVE (3), TRIALS_JUDGMENT (2), HYBRID=1 adds the frontier-captain arm (spends Claude quota),
-#      OUT (.consensus/bench/groq-vs-frontier), CONSENSUS (consensus binary).
+# Env: TRIALS_OBJECTIVE (3), TRIALS_JUDGMENT (2), OUT (.consensus/bench/groq-vs-frontier), CONSENSUS (consensus binary).
+# GPT-6 Astra needs Codex CLI >= 0.154 first on PATH.
 set -eu
 WHICH="${1:-all}"
 C="${CONSENSUS:-consensus}"
 OUT="${OUT:-.consensus/bench/groq-vs-frontier}"
-TEAMS="groq-angles,groq-plain,groq-angles-small"
-[ "${HYBRID:-0}" = 1 ] && TEAMS="$TEAMS,groq-angles-frontier-captain"
-BASE="groq:openai/gpt-oss-120b,groq:openai/gpt-oss-20b,claude:claude-fable-5-1,claude:claude-opus-5,codex:gpt-5.6-sol"
+TEAMS="groq-angles,groq-plain,groq-angles-small,groq-angles-mixed"
+BASE="groq:openai/gpt-oss-120b,groq:openai/gpt-oss-20b,groq:qwen/qwen3.8-27b,claude:claude-fable-5-1,claude:claude-opus-5,codex:gpt-6-astra,codex:gpt-5.6-sol"
 SELF="groq:openai/gpt-oss-120bx5"
 
 "$C" models groq >/dev/null || { echo "Groq is not reachable: run \`consensus connect groq\`" >&2; exit 1; }

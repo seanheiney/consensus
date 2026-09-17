@@ -7,6 +7,7 @@ import type { Usage } from "./types.js";
 export const GROQ_PRICES: Record<string, { input: number; output: number }> = {
   "openai/gpt-oss-120b": { input: 0.15, output: 0.6 },
   "openai/gpt-oss-20b": { input: 0.075, output: 0.3 },
+  "qwen/qwen3.8-27b": { input: 0.8, output: 4 },
 };
 
 export function priceFor(panelistId: string): { input: number; output: number } | undefined {
