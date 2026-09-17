@@ -92,7 +92,38 @@ export class ConsensusEngine {
     this.emit = opts.onEvent ?? (() => {});
   }
 
+  /**
+   * Run a debate. Seat failures are per seat: a failed turn (after one retry on transient errors) drops that seat,
+   * every other seat's turn in the phase still completes and is recorded, and the debate continues while two seats
+   * remain. If the run cannot continue (quorum lost, spend ceiling, abort), the error carries `partial`: the run
+   * record up to that point (proposals, completed rounds, usage, dropped seats) so callers can persist it.
+   */
   async run(prompt: string, context?: string): Promise<ConsensusRun> {
+    try {
+      return await this.runInner(prompt, context);
+    } catch (err) {
+      const e = err as Error & { partial?: ConsensusRun };
+      if (this.current && !e.partial && this.liveStates) {
+        const run = this.current;
+        run.finalAnswers = this.answers(this.liveStates);
+        for (const st of this.liveStates) {
+          if (!st.active && st.error) run.dropped[st.panelist.id] = st.error;
+          if (st.usage.reported) run.usage[st.panelist.id] = { ...st.usage, reported: undefined, billing: st.panelist.billing };
+        }
+        if (this.captainState?.usage.reported) run.usage[this.captainState.panelist.id] ??= { ...this.captainState.usage, reported: undefined, billing: this.captainState.panelist.billing };
+        for (const [id, u] of Object.entries(this.retiredUsage)) run.usage[id] ??= u;
+        const c = estimateCost(run.usage);
+        run.cost = { billedUsd: c.usd, subscriptionEquivUsd: c.subscriptionEquivUsd, unpriced: c.unpriced, summary: describeCost(c) };
+        run.finishedAt = new Date().toISOString();
+        e.partial = run;
+      }
+      throw err;
+    }
+  }
+
+  private liveStates?: PanelistState[];
+
+  private async runInner(prompt: string, context?: string): Promise<ConsensusRun> {
     const rounds = Math.max(1, this.opts.rounds ?? 3);
     const effort = this.opts.effort ?? "high";
     const captain = this.opts.captain;
@@ -140,6 +171,7 @@ export class ConsensusEngine {
     };
 
     this.current = run;
+    this.liveStates = states;
     this.emit({ type: "start", runId: run.id, labels: run.labels, seats: run.seats, prompt, context, rounds, effort });
 
     // ---- Phase 1: independent proposals -------------------------------

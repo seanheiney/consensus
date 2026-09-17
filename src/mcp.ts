@@ -91,7 +91,20 @@ export function createMcpServer(): McpServer {
         }
       };
       const engine = new ConsensusEngine({ panel: r.panel, judge: r.judge, captain: r.captain, rounds: r.rounds, effort: r.effort, maxTokens: cfg.maxTokens, maxCostUsd: max_cost ?? cfg.maxCostUsd, maxSpendUsd: max_spend ?? cfg.maxSpendUsd, onEvent, signal: extra.signal });
-      const run = await engine.run(prompt, context);
+      let run: import("./types.js").ConsensusRun;
+      try {
+        run = await engine.run(prompt, context);
+      } catch (err) {
+        await debate?.close();
+        const partial = (err as { partial?: import("./types.js").ConsensusRun }).partial;
+        const reason = (err as Error).message.split("\n")[0];
+        if (partial) {
+          partial.synthesis = `(no synthesis: ${reason})`;
+          const dir = await saveRun(partial, runsDir).catch(() => "");
+          return { isError: true, content: [{ type: "text" as const, text: `${(err as Error).message}${dir ? `\nPartial debate saved (completed turns, dropped seats, usage): ${dir}/debate.md` : ""}` }] };
+        }
+        throw err;
+      }
       await debate?.close();
       let saved = "";
       try {

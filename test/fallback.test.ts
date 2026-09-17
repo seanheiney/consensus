@@ -57,3 +57,27 @@ describe("captain handoff", () => {
     expect(events.some((e) => e.type === "panelist:error" && e.phase === "synthesize" && /writes the report instead/.test(e.error))).toBe(true);
   });
 });
+
+describe("seat failure boundary", () => {
+  it("a seat that fails drops alone; the other seats' turns are kept and the debate continues", async () => {
+    const dead = fake("grok:grok-4.6", (req) => (req.phase === "critique" ? limit() : "Use cron."));
+    const engine = new ConsensusEngine({ panel: [seat("claude:claude-opus-5"), seat("codex:gpt-5.6-sol"), dead], rounds: 1 });
+    const run = await engine.run("Queue or cron?");
+    expect(Object.keys(run.dropped)).toEqual(["grok:grok-4.6"]);
+    expect(Object.keys(run.proposals)).toHaveLength(3);
+    expect(Object.keys(run.rounds[0]!.critiques)).toHaveLength(2);
+    expect(run.synthesis).toBeTruthy();
+  });
+
+  it("when quorum is lost the error carries the partial run: completed turns, dropped seats, usage", async () => {
+    const dead = fake("codex:gpt-5.6-sol", (req) => (req.phase === "critique" ? limit() : "Use cron."));
+    const engine = new ConsensusEngine({ panel: [seat("claude:claude-opus-5"), dead], rounds: 2 });
+    const err = (await engine.run("Queue or cron?").catch((e) => e)) as Error & { partial?: import("../src/types.js").ConsensusRun };
+    expect(err.message).toMatch(/Fewer than 2 panelists/);
+    expect(err.partial).toBeDefined();
+    expect(Object.keys(err.partial!.proposals)).toHaveLength(2);
+    expect(err.partial!.dropped["codex:gpt-5.6-sol"]).toMatch(/limit/);
+    expect(err.partial!.usage["claude:claude-opus-5"]).toBeDefined();
+    expect(err.partial!.finishedAt).toBeTruthy();
+  });
+});

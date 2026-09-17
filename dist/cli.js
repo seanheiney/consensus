@@ -9,7 +9,7 @@ import { credentialEnv, loadCredentials } from "./credentials.js";
 import { createPack, describePack, diffPack, installPack, readPack, removePack } from "./packs.js";
 import { configWarnings, splitMember } from "./config.js";
 import { ensureGitignore } from "./hosts.js";
-import { CostLimitError, describeCost, estimateCost } from "./cost.js";
+import { describeCost, estimateCost } from "./cost.js";
 import { setDefaultTimeout } from "./providers/cli.js";
 import { probeSpecs, scanVendors } from "./doctor.js";
 import { installProjectMcp, installProjectSkills, listHosts, mcpLaunchCommand } from "./hosts.js";
@@ -228,10 +228,12 @@ program
     }
     catch (err) {
         await debate?.close();
-        if (err instanceof CostLimitError && err.partial && o.save !== false) {
-            // Keep the debate so far; the user paid for it.
-            err.partial.synthesis = `(no synthesis: ${err.message})`;
-            const dir = await saveRun(err.partial, runsDir);
+        const partial = err.partial;
+        if (partial && o.save !== false) {
+            // Keep the debate so far: every completed turn, who dropped and why, and what it cost.
+            const reason = err.message.split("\n")[0];
+            partial.synthesis = `(no synthesis: ${reason})`;
+            const dir = await saveRun(partial, runsDir);
             log(yellow(`${err.message}\nPartial debate saved to ${dir} (no synthesis). Exit code 3.`));
             process.exitCode = 3;
             return;

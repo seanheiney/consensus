@@ -211,11 +211,13 @@ program
       run = await engine.run(prompt, context);
     } catch (err) {
       await debate?.close();
-      if (err instanceof CostLimitError && err.partial && o.save !== false) {
-        // Keep the debate so far; the user paid for it.
-        err.partial.synthesis = `(no synthesis: ${err.message})`;
-        const dir = await saveRun(err.partial, runsDir);
-        log(yellow(`${err.message}\nPartial debate saved to ${dir} (no synthesis). Exit code 3.`));
+      const partial = (err as { partial?: import("./types.js").ConsensusRun }).partial;
+      if (partial && o.save !== false) {
+        // Keep the debate so far: every completed turn, who dropped and why, and what it cost.
+        const reason = (err as Error).message.split("\n")[0];
+        partial.synthesis = `(no synthesis: ${reason})`;
+        const dir = await saveRun(partial, runsDir);
+        log(yellow(`${(err as Error).message}\nPartial debate saved to ${dir} (no synthesis). Exit code 3.`));
         process.exitCode = 3;
         return;
       }

@@ -6,7 +6,15 @@ export declare class ConsensusEngine {
     private readonly opts;
     private readonly emit;
     constructor(opts: ConsensusOptions);
+    /**
+     * Run a debate. Seat failures are per seat: a failed turn (after one retry on transient errors) drops that seat,
+     * every other seat's turn in the phase still completes and is recorded, and the debate continues while two seats
+     * remain. If the run cannot continue (quorum lost, spend ceiling, abort), the error carries `partial`: the run
+     * record up to that point (proposals, completed rounds, usage, dropped seats) so callers can persist it.
+     */
     run(prompt: string, context?: string): Promise<ConsensusRun>;
+    private liveStates?;
+    private runInner;
     private rnd;
     /** Same answers, shuffled order, labels intact. */
     private reorder;
