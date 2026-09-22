@@ -59,7 +59,7 @@
     "@google/genai": "^2.22.0",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "commander": "^15.0.0",
-    "openai": "^7.15.0",
+    "openai": "^7.19.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
