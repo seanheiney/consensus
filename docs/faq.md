@@ -123,6 +123,10 @@ Each subscription seat runs in a fresh empty temp directory, with these flags:
 | `gemini` (Gemini CLI) | `-p -o json --approval-mode plan --allowed-mcp-server-names __consensus_none__` | Plan (read-only) mode, and an MCP allow-list naming a server that does not exist. |
 | `grok` (Grok CLI) | `--prompt-file … --output-format json --tools "" --system-prompt-override …` | No tools. |
 
+The clean room is identical whether a debate starts from the `consensus` CLI or from an agent calling the MCP server. It is applied per seat, not per entry point: both build the same engine and the same seats. The MCP server is its own process that receives only the tool arguments, and it never uses MCP sampling, roots or elicitation, so it cannot read the host agent's conversation or reach its tools. The one way host context gets to a panelist is the `prompt` and `context` the agent chooses to write. Checked from inside a Claude Code session with around 80 MCP tools and user skills loaded: a nested Claude seat started with `tools: []`, `mcp_servers: []`, no plugins, and a 418-token prompt.
+
+Two things do carry over from the host, and neither adds tools or context. Seats inherit the MCP server's environment, so a host that launches the server with `ANTHROPIC_API_KEY` or a base-URL override changes which account or endpoint a seat uses, exactly as running the CLI from that shell would. And the server reads the project `consensus.config.json` from the directory the host launched it in, which can change who sits on the panel.
+
 What this does **not** do: it is a configuration clean room, not a sandbox. It relies on the vendor CLI honouring its own flags. It does not use OS-level isolation, containers, or seccomp. If you need a hard boundary, run consensus itself inside your own container.
 
 The Gemini row is the weakest: `--allowed-mcp-server-names` is an allow-list rather than a disable switch, and that behaviour has not been verified against a live Gemini CLI connection. It is recorded as an open item in [docs/qa/](qa/).
