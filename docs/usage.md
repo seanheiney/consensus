@@ -439,13 +439,13 @@ consensus install --project              # skill files + .mcp.json for this repo
 ```bash
 consensus setup [--yes] [--project] [--probe] [--no-first-run]
 consensus connect claude|codex|gemini|grok|openrouter
-consensus doctor [--probe]
+consensus doctor [--probe] [--isolation]
 consensus models
 consensus install [--project] [--skills-only] [--mcp-only]
 consensus uninstall [--purge]
 ```
 
-`consensus doctor` prints Accounts, Profiles and Hosts; `--probe` adds one tiny real call through each connection with its latency and reply. It is the right thing to paste into a bug report.
+`consensus doctor` prints Accounts, Profiles and Hosts; `--probe` adds one tiny real call through each connection with its latency and reply. `--isolation` makes one tiny call per subscription seat and shows what that seat could reach: tools, MCP servers and plugins as the CLI reported them, its lockdown flags, and which environment variables were withheld (see [the FAQ](faq.md#what-does-the-clean-room-actually-block)). It is the right thing to paste into a bug report.
 
 ## Environment variables
 

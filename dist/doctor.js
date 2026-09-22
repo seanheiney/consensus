@@ -77,7 +77,7 @@ export async function probe(panelist, timeoutMs = 120_000) {
             signal: ac.signal,
             phase: "probe",
         });
-        return { id: panelist.id, ok: true, ms: Date.now() - t0, sample: r.text.trim().slice(0, 40) };
+        return { id: panelist.id, ok: true, ms: Date.now() - t0, sample: r.text.trim().slice(0, 40), isolation: r.isolation };
     }
     catch (err) {
         return { id: panelist.id, ok: false, ms: Date.now() - t0, error: err.message.split("\n")[0].slice(0, 200) };

@@ -11,6 +11,7 @@ import { openDebateLog } from "./debatelog.js";
 import { scanVendors } from "./doctor.js";
 import { describeProfile } from "./profiles.js";
 import { ConsensusEngine } from "./protocol/engine.js";
+import { isolationSummary } from "./providers/isolation.js";
 import { renderReport } from "./report.js";
 import { statusLine } from "./setup.js";
 import { saveRun } from "./store.js";
@@ -128,6 +129,7 @@ export function createMcpServer() {
             `---`,
             `Panel: ${seats}.${run.captain ? ` Captain: ${run.captain}.` : ""} ${run.converged ? `Converged after ${run.rounds.length} round(s).` : `Did not fully converge after ${run.rounds.length} round(s).`}${Object.keys(run.dropped).length ? ` Dropped: ${Object.keys(run.dropped).join(", ")}.` : ""}`,
             `Cost: ${describeCost(cost)}.`,
+            isolationSummary(run.isolation) ?? "",
             saved ? `Full debate: ${saved}/debate.md  (or \`consensus log ${run.id}\`). Call again with transcript=true for the whole report.` : "",
         ]
             .filter(Boolean)

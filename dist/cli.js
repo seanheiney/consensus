@@ -11,6 +11,7 @@ import { configWarnings, splitMember } from "./config.js";
 import { ensureGitignore } from "./hosts.js";
 import { GROQ_PRICES, describeCost, estimateCost } from "./cost.js";
 import { setDefaultTimeout } from "./providers/cli.js";
+import { describeIsolation, foldIsolation, seatEnv } from "./providers/isolation.js";
 import { probeSpecs, scanVendors } from "./doctor.js";
 import { installProjectMcp, installProjectSkills, listHosts, mcpLaunchCommand } from "./hosts.js";
 import { describeProfile, editProfile, materializePreset, memberLabel, profileWarnings } from "./profiles.js";
@@ -311,6 +312,7 @@ program
     .command("doctor")
     .description("show which subscriptions / keys are connected and which IDEs are set up")
     .option("--probe", "make one tiny live call through each connected vendor")
+    .option("--isolation", "make one tiny live call per subscription seat and show what it could reach (tools, MCP servers, environment); exits 1 if any seat is not clean or could not be checked")
     .action(async (o) => {
     const statuses = await scanVendors(credentialEnv());
     for (const w of configWarnings)
@@ -352,7 +354,41 @@ program
         for (const r of await probeSpecs(specs))
             log(`  ${r.ok ? green(G.ok) : red(G.err)} ${r.id.padEnd(12)} ${r.ok ? `${(r.ms / 1000).toFixed(1)}s "${r.sample}"` : r.error}`);
     }
+    if (o.isolation) {
+        const specs = statuses.filter((s) => s.connected && s.via === "cli").map((s) => s.spec);
+        log(bold("\nIsolation (one tiny live call per subscription seat)"));
+        if (!specs.length)
+            log(dim("  no subscription seats connected; API seats send no tools and need no check"));
+        let dirty = false;
+        for (const r of await probeSpecs(specs, credentialEnv())) {
+            if (!r.ok || !r.isolation) {
+                log(`  ${red(G.err)} ${r.id.padEnd(12)} ${r.error ?? "no isolation receipt returned"}`);
+                dirty = true;
+                continue;
+            }
+            const s = foldIsolation(undefined, r.isolation);
+            dirty ||= !s.clean;
+            log(`  ${s.clean ? green(G.ok) : red(G.err)} ${describeIsolation(r.id, s)}`);
+            if (s.flags)
+                log(dim(`      flags: ${s.flags.join(" ")}`));
+            if (s.apiKeySource)
+                log(dim(`      credentials: ${s.apiKeySource === "none" ? "subscription login" : s.apiKeySource}`));
+        }
+        const withheld = Object.keys(seatEnv("claude").env).length < Object.keys(process.env).length ? notableWithheld() : [];
+        if (withheld.length)
+            log(dim(`  withheld from every seat, e.g.: ${withheld.join(", ")}  (names only; CONSENSUS_SEAT_ENV passes extras)`));
+        if (dirty)
+            process.exitCode = 1;
+    }
 });
+/** Names of parent variables no seat receives that look like keys, tokens or host-agent state. */
+function notableWithheld() {
+    const any = new Set(["claude", "codex", "gemini", "grok"].flatMap((v) => Object.keys(seatEnv(v).env)));
+    return Object.keys(process.env)
+        .filter((k) => !any.has(k) && /(^|_)(KEY|TOKEN|SECRET|PASSWORD)(_|$)|^CLAUDE|^CODEX|MCP|^SSH_AUTH|^GITHUB|^GH_/i.test(k))
+        .sort()
+        .slice(0, 12);
+}
 program
     .command("connect")
     .argument("<vendor>", `one of: ${VENDORS.map((v) => v.vendor).join(", ")}, groq`)

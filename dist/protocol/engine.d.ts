@@ -34,6 +34,7 @@ export declare class ConsensusEngine {
     private captainState?;
     private callJsonWith;
     private retiredUsage;
+    private isolation;
     private completeFor;
     private callWith;
     /** Call, parse JSON, validate; on failure ask the model once to repair. */

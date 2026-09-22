@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+### Added
+- Isolation receipts: every seat call reports how it was isolated, and runs record them per seat (`run.json` `isolation`, the report, the MCP summary). Claude seats are observed: Claude Code's startup event lists the tools, MCP servers and plugins it loaded, and anything beyond structured output and its own built-ins marks the seat not clean. Codex, Gemini and Grok record their lockdown flags; API seats attach no tools.
+- `consensus doctor --isolation`: one tiny live call per subscription seat, printing its receipt, flags and withheld environment; exits 1 if a seat is not clean or could not be checked.
+- `.github/dependabot.yml` for GitHub Actions and npm.
+
+### Changed
+- Subscription seats get an allow-listed environment instead of inheriting the parent's: other vendors' keys, `GITHUB_TOKEN`, `SSH_AUTH_SOCK` and a host agent's session variables (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, messaging socket) no longer reach a seat. `CONSENSUS_SEAT_ENV="A,B"` passes extra names.
+- Claude seats run with `--output-format stream-json --verbose` so the startup event can be read.
+- Codex errors reported through `--json` events (for example a usage limit) are shown in full instead of the first event line.
+- GitHub Actions are pinned to commit SHAs and `ci.yml` defaults to read-only permissions.
+
 ## [0.2.0] — 2026-09-16
 
 ### Added

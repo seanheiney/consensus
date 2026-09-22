@@ -1,5 +1,5 @@
 import { type Vendor } from "./providers/index.js";
-import type { Panelist } from "./types.js";
+import type { IsolationReceipt, Panelist } from "./types.js";
 export interface CliStatus {
     name: string;
     bin: string;
@@ -31,6 +31,7 @@ export interface ProbeResult {
     ms: number;
     sample?: string;
     error?: string;
+    isolation?: IsolationReceipt;
 }
 /** Make one tiny real call through a panelist. */
 export declare function probe(panelist: Panelist, timeoutMs?: number): Promise<ProbeResult>;

@@ -11,8 +11,10 @@ import type {
   PanelistState,
   Revision,
   RoundRecord,
+  SeatIsolation,
   Usage,
 } from "../types.js";
+import { foldIsolation } from "../providers/isolation.js";
 import { extractJson } from "./json.js";
 import { CritiqueSchema, ModerationSchema, RevisionSchema } from "./schemas.js";
 import { CAPTAIN_PROMPT, SYSTEM_PROMPT, critiquePrompt, moderatorPrompt, problemBlock, proposePrompt, revisePrompt, synthesizePrompt, debateLeak, standaloneRepairPrompt } from "./prompts.js";
@@ -63,6 +65,8 @@ function addUsage(a: Usage, b?: Usage): void {
   if (b.cacheReadTokens) a.cacheReadTokens = (a.cacheReadTokens ?? 0) + b.cacheReadTokens;
   if (b.costUsd !== undefined) a.costUsd = (a.costUsd ?? 0) + b.costUsd;
 }
+
+const CLI_PROVIDERS = new Set(["claude", "codex", "gemini", "grok"]);
 
 function newRunId(): string {
   const d = new Date();
@@ -168,6 +172,8 @@ export class ConsensusEngine {
       synthesis: "",
       usage: {},
       dropped: {},
+      // Shared with callWith, so a partial run saved on failure carries the receipts gathered so far.
+      isolation: (this.isolation = {}),
     };
 
     this.current = run;
@@ -494,6 +500,7 @@ export class ConsensusEngine {
   }
 
   private retiredUsage: Record<string, Usage> = {};
+  private isolation: Record<string, SeatIsolation> = {};
 
   private completeFor(s: PanelistState, system: string, messages: ChatMessage[], phase: CompletionRequest["phase"], json: boolean, jsonSchema?: Record<string, unknown>) {
     return s.panelist.complete({
@@ -524,6 +531,9 @@ export class ConsensusEngine {
       }
     }
     addUsage(s.usage, res.usage);
+    // API adapters attach no tools to their requests; CLI adapters return their own receipt.
+    const receipt = res.isolation ?? (CLI_PROVIDERS.has(s.panelist.provider) ? undefined : { route: "api" as const, evidence: "request" as const });
+    if (receipt) this.isolation[s.panelist.id] = foldIsolation(this.isolation[s.panelist.id], receipt);
     if (res.servedBy && res.servedBy !== s.panelist.model) this.emit({ type: "served-by", label: s.label, panelist: s.panelist.id, model: res.servedBy, phase: phase ?? "call" });
     if (phase === "propose" && res.reasoning) s.reasoning = res.reasoning;
     return res.text;

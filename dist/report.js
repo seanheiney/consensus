@@ -1,3 +1,4 @@
+import { describeIsolation, isolationSummary } from "./providers/isolation.js";
 function fmt(n) {
     return n.toLocaleString("en-US");
 }
@@ -36,6 +37,12 @@ export function renderReport(run, opts = {}) {
             const known = u && (u.inputTokens || u.outputTokens);
             lines.push(known ? `| ${id} | ${fmt(u.inputTokens)} | ${fmt(u.outputTokens)} |` : `| ${id} | n/a${CLI.has(provider) ? " (subscription CLI)" : ""} | n/a |`);
         }
+    }
+    const iso = isolationSummary(run.isolation);
+    if (iso) {
+        lines.push("", `_${iso}_`);
+        for (const [id, s] of Object.entries(run.isolation))
+            lines.push(`- ${describeIsolation(id, s)}`);
     }
     if (opts.transcript)
         lines.push("", renderTranscript(run));

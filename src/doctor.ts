@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { runCommand } from "./providers/cli.js";
 import { PROVIDERS, VENDORS, onPath, createPanelist, type Vendor } from "./providers/index.js";
-import type { Panelist } from "./types.js";
+import type { IsolationReceipt, Panelist } from "./types.js";
 
 export interface CliStatus {
   name: string;
@@ -98,6 +98,7 @@ export interface ProbeResult {
   ms: number;
   sample?: string;
   error?: string;
+  isolation?: IsolationReceipt;
 }
 
 /** Make one tiny real call through a panelist. */
@@ -114,7 +115,7 @@ export async function probe(panelist: Panelist, timeoutMs = 120_000): Promise<Pr
       signal: ac.signal,
       phase: "probe",
     });
-    return { id: panelist.id, ok: true, ms: Date.now() - t0, sample: r.text.trim().slice(0, 40) };
+    return { id: panelist.id, ok: true, ms: Date.now() - t0, sample: r.text.trim().slice(0, 40), isolation: r.isolation };
   } catch (err) {
     return { id: panelist.id, ok: false, ms: Date.now() - t0, error: (err as Error).message.split("\n")[0]!.slice(0, 200) };
   } finally {

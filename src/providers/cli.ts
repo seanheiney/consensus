@@ -5,13 +5,15 @@
  * and this tool never sees a token.
  *
  * Every call runs in a fresh empty temp directory so the panelist cannot pick
- * up CLAUDE.md / AGENTS.md / project context from wherever the user ran us.
+ * up CLAUDE.md / AGENTS.md / project context from wherever the user ran us,
+ * with an allow-listed environment (seatEnv), and returns an isolation receipt.
  */
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TransientError, type ChatMessage, type CompletionRequest, type CompletionResult, type Effort, type Panelist, type Usage } from "../types.js";
+import { TransientError, type ChatMessage, type CompletionRequest, type CompletionResult, type Effort, type IsolationReceipt, type Panelist, type Usage } from "../types.js";
+import { receiptFlags, seatEnv } from "./isolation.js";
 
 /** A single headless call is killed after this long unless the caller overrides it (see setDefaultTimeout / --timeout). */
 export let DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
@@ -28,14 +30,15 @@ export interface RunResult {
 export function runCommand(
   bin: string,
   args: string[],
-  opts: { stdin?: string; env?: NodeJS.ProcessEnv; cwd?: string; signal?: AbortSignal; timeoutMs?: number } = {},
+  opts: { stdin?: string; env?: NodeJS.ProcessEnv; cwd?: string; signal?: AbortSignal; timeoutMs?: number; inherit?: boolean } = {},
 ): Promise<RunResult> {
   return new Promise((resolve, reject) => {
-    // Spawn with the user's real shell environment only. Stored consensus
-    // credentials are never merged in (see credentials.ts).
+    // Spawn with the user's real shell environment only (or, for seats, only
+    // opts.env: see seatEnv). Stored consensus credentials are never merged in
+    // (see credentials.ts).
     const child = spawn(bin, args, {
       cwd: opts.cwd,
-      env: { ...process.env, ...opts.env },
+      env: opts.inherit === false ? { ...opts.env } : { ...process.env, ...opts.env },
       stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
@@ -67,6 +70,25 @@ export function flattenMessages(messages: ChatMessage[]): string {
         : `--- Your previous response ---\n${m.content}\n--- End of your previous response ---`,
     )
     .join("\n\n");
+}
+
+/** A seat's environment and the receipt fields that describe it. */
+function isolatedEnv(vendor: string, extra: NodeJS.ProcessEnv = {}) {
+  const s = seatEnv(vendor);
+  return { env: { ...s.env, ...extra }, envPassed: [...new Set([...s.passed, ...Object.keys(extra)])].sort(), envDropped: s.dropped };
+}
+
+const versions = new Map<string, Promise<string | undefined>>();
+/** `<bin> --version`, once per process. */
+function cliVersion(bin: string): Promise<string | undefined> {
+  let v = versions.get(bin);
+  if (!v) {
+    v = runCommand(bin, ["--version"], { timeoutMs: 15_000 })
+      .then((r) => (r.stdout + r.stderr).match(/(\d+\.\d+\.\d+)/)?.[1])
+      .catch(() => undefined);
+    versions.set(bin, v);
+  }
+  return v;
 }
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
@@ -122,9 +144,11 @@ export function createClaudeCliPanelist(opts: CliPanelistOptions = {}): Panelist
       const effort = CLAUDE_EFFORT[opts.effort ?? req.effort ?? "high"];
       // Clean room: no built-in tools, no settings files, no CLAUDE.md / skills /
       // plugins / hooks (--safe-mode), and no user MCP servers (--strict-mcp-config).
+      // stream-json (not json) so the startup event reports the tools / MCP servers the CLI actually loaded.
       const args = [
         "-p",
-        "--output-format", "json",
+        "--output-format", "stream-json",
+        "--verbose",
         "--tools", "",
         "--no-session-persistence",
         "--setting-sources", "",
@@ -136,16 +160,42 @@ export function createClaudeCliPanelist(opts: CliPanelistOptions = {}): Panelist
       if (claudeTakesEffort(opts.model)) args.push("--effort", effort);
       if (opts.model) args.push("--model", opts.model);
       if (req.jsonSchema) args.push("--json-schema", JSON.stringify(req.jsonSchema));
+      const iso = isolatedEnv("claude");
       const res = await withTempDir((cwd) =>
-        runCommand(bin, args, { stdin: flattenMessages(req.messages), cwd, signal: req.signal, timeoutMs: opts.timeoutMs }),
+        runCommand(bin, args, { stdin: flattenMessages(req.messages), cwd, env: iso.env, inherit: false, signal: req.signal, timeoutMs: opts.timeoutMs }),
       );
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(res.stdout);
-      } catch {
-        if (res.code === null || /SIGTERM|SIGKILL|timed out/i.test(res.stderr)) throw new TransientError(`claude timed out or was killed (exit ${res.code})`);
-        throw new Error(`claude returned non-JSON (exit ${res.code}): ${tail(res.stderr || res.stdout)}`);
+      let init: Record<string, unknown> | undefined;
+      let result: Record<string, unknown> | undefined;
+      for (const line of res.stdout.split("\n")) {
+        if (!line.startsWith("{")) continue;
+        try {
+          const ev = JSON.parse(line) as Record<string, unknown>;
+          if (ev.type === "system" && ev.subtype === "init") init = ev;
+          else if (ev.type === "result") result = ev;
+        } catch {
+          /* partial line */
+        }
       }
+      if (!result) {
+        if (res.code === null || /SIGTERM|SIGKILL|timed out/i.test(res.stderr)) throw new TransientError(`claude timed out or was killed (exit ${res.code})`);
+        throw new Error(`claude returned no result (exit ${res.code}): ${tail(res.stderr || res.stdout)}`);
+      }
+      const parsed = result;
+      const strings = (v: unknown) => (Array.isArray(v) ? v.map((x) => (typeof x === "string" ? x : String((x as { name?: unknown })?.name ?? JSON.stringify(x)))) : undefined);
+      const isolation: IsolationReceipt = {
+        route: "cli",
+        evidence: init ? "observed" : "configured",
+        bin,
+        version: typeof init?.claude_code_version === "string" ? init.claude_code_version : undefined,
+        flags: receiptFlags(args, ["--system-prompt", "--json-schema", "--model"]),
+        envPassed: iso.envPassed,
+        envDropped: iso.envDropped,
+        tools: strings(init?.tools),
+        mcpServers: strings(init?.mcp_servers),
+        // Plugins by source, so Claude Code's own built-ins ("agents-md@builtin") stay distinguishable from installed ones.
+        plugins: Array.isArray(init?.plugins) ? (init.plugins as unknown[]).map((x) => (typeof x === "string" ? x : String((x as { source?: unknown; name?: unknown }).source ?? (x as { name?: unknown }).name))) : undefined,
+        apiKeySource: typeof init?.apiKeySource === "string" ? init.apiKeySource : undefined,
+      };
       if (parsed.is_error || (typeof parsed.result !== "string" && parsed.structured_output === undefined)) {
         const msg = typeof parsed.result === "string" ? parsed.result : tail(res.stderr);
         if (/rate limit|overloaded|529|429/i.test(msg)) throw new TransientError(`claude: ${msg}`);
@@ -160,6 +210,7 @@ export function createClaudeCliPanelist(opts: CliPanelistOptions = {}): Panelist
       return {
         text: parsed.result as string,
         usage: u ? { inputTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), outputTokens: u.output_tokens ?? 0, cacheReadTokens: u.cache_read_input_tokens ?? 0, costUsd } : undefined,
+        isolation,
       };
     },
   };
@@ -212,10 +263,15 @@ export function createCodexCliPanelist(opts: CliPanelistOptions = {}): Panelist 
         args.push("-");
         // Codex has no system-prompt flag; the instructions lead the prompt.
         const stdin = `# Instructions\n\n${req.system}\n\n# Request\n\n${flattenMessages(req.messages)}`;
-        const res = await runCommand(bin, args, { stdin, cwd, signal: req.signal, timeoutMs: opts.timeoutMs });
+        const iso = isolatedEnv("codex");
+        const [res, version] = await Promise.all([runCommand(bin, args, { stdin, cwd, env: iso.env, inherit: false, signal: req.signal, timeoutMs: opts.timeoutMs }), cliVersion(bin)]);
+        // Codex's --json events carry no tool or MCP list, so this receipt records the lockdown flags only.
+        const isolation: IsolationReceipt = { route: "cli", evidence: "configured", bin, version, flags: receiptFlags(args, ["-o", "--output-schema", "-m"]), envPassed: iso.envPassed, envDropped: iso.envDropped };
         const text = await readFile(out, "utf8").catch(() => "");
         if (!text.trim()) {
-          const err = res.stderr.match(/ERROR: (.*)/)?.[1] ?? res.stdout.match(/ERROR: (.*)/)?.[1];
+          // With --json, failures arrive as {"type":"error","message":...} events rather than "ERROR:" lines.
+          const jsonErr = res.stdout.split("\n").reverse().map((l) => { try { return JSON.parse(l) as { type?: string; message?: string }; } catch { return undefined; } }).find((e) => e?.type === "error" && e.message)?.message;
+          const err = jsonErr ?? res.stderr.match(/ERROR: (.*)/)?.[1] ?? res.stdout.match(/ERROR: (.*)/)?.[1];
           const msg = err ? tail(err) : tail(res.stderr || res.stdout);
           if (res.code === null || /rate limit|429|overloaded|timed out|SIGTERM/i.test(msg)) throw new TransientError(`codex: ${msg}`);
           const hint = /newer version of Codex/i.test(msg)
@@ -237,7 +293,7 @@ export function createCodexCliPanelist(opts: CliPanelistOptions = {}): Panelist 
             /* not our line */
           }
         }
-        return { text, usage };
+        return { text, usage, isolation };
       });
     },
   };
@@ -260,15 +316,18 @@ export function createGeminiCliPanelist(opts: CliPanelistOptions = {}): Panelist
       const args = ["-p", "Respond to the request above.", "-o", "json", "--approval-mode", "plan", "--allowed-mcp-server-names", "__consensus_none__"];
       if (opts.model) args.push("-m", opts.model);
       const stdin = `# Instructions\n\n${req.system}\n\n# Request\n\n${flattenMessages(req.messages)}`;
+      const iso = isolatedEnv("gemini", { GEMINI_CLI_TRUST_WORKSPACE: "true" });
       const res = await withTempDir((cwd) =>
         runCommand(bin, args, {
           stdin,
           cwd,
-          env: { GEMINI_CLI_TRUST_WORKSPACE: "true" },
+          env: iso.env,
+          inherit: false,
           signal: req.signal,
           timeoutMs: opts.timeoutMs,
         }),
       );
+      const isolation: IsolationReceipt = { route: "cli", evidence: "configured", bin, flags: receiptFlags(args, ["-p", "-m"]), envPassed: iso.envPassed, envDropped: iso.envDropped };
       let parsed: Record<string, unknown> | undefined;
       try {
         const start = res.stdout.indexOf("{");
@@ -294,7 +353,7 @@ export function createGeminiCliPanelist(opts: CliPanelistOptions = {}): Panelist
           usage.outputTokens += m.tokens?.candidates ?? 0;
         }
       }
-      return { text, usage };
+      return { text, usage, isolation };
     },
   };
 }
@@ -326,7 +385,9 @@ export function createGrokCliPanelist(opts: CliPanelistOptions = {}): Panelist {
           "--reasoning-effort", effort,
         ];
         if (opts.model) args.push("-m", opts.model);
-        const res = await runCommand(bin, args, { cwd, signal: req.signal, timeoutMs: opts.timeoutMs });
+        const iso = isolatedEnv("grok");
+        const res = await runCommand(bin, args, { cwd, env: iso.env, inherit: false, signal: req.signal, timeoutMs: opts.timeoutMs });
+        const isolation: IsolationReceipt = { route: "cli", evidence: "configured", bin, flags: receiptFlags(args, ["--prompt-file", "--system-prompt-override", "-m"]), envPassed: iso.envPassed, envDropped: iso.envDropped };
         let text: string | undefined;
         // Headless JSON may be a single object or one object per line; take the last with text.
         for (const line of res.stdout.trim().split("\n").reverse()) {
@@ -344,7 +405,7 @@ export function createGrokCliPanelist(opts: CliPanelistOptions = {}): Panelist {
         }
         if (!text) text = res.code === 0 && res.stdout.trim() && !res.stdout.trim().startsWith("{") ? res.stdout.trim() : undefined;
         if (!text) throw new Error(`grok produced no answer (exit ${res.code}): ${tail(res.stderr || res.stdout)}`);
-        return { text };
+        return { text, isolation };
       });
     },
   };

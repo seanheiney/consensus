@@ -43,6 +43,34 @@ export interface CompletionResult {
     reasoning?: string;
     /** Model that actually served the call when it differs from the one asked for (refusal fallback). */
     servedBy?: string;
+    /** How this call was isolated; see providers/isolation.ts. */
+    isolation?: IsolationReceipt;
+}
+/** What one seat call was allowed to reach, as reported by the provider. */
+export interface IsolationReceipt {
+    route: "cli" | "api";
+    /** "observed": the CLI itself reported its tool / MCP surface at startup. "configured": lockdown flags only. "request": an API call with no tools attached. */
+    evidence: "observed" | "configured" | "request";
+    bin?: string;
+    version?: string;
+    /** Isolation flags passed, with prompt-bearing values elided. */
+    flags?: string[];
+    /** Names (never values) of the environment variables the CLI received. */
+    envPassed?: string[];
+    /** How many parent environment variables were withheld. */
+    envDropped?: number;
+    /** Observed tools, MCP servers and plugins (evidence "observed" only). */
+    tools?: string[];
+    mcpServers?: string[];
+    plugins?: string[];
+    /** Where the CLI took its credentials from, when it says ("none" = subscription login). */
+    apiKeySource?: string;
+}
+/** A seat's isolation across every call it made in a run. */
+export interface SeatIsolation extends IsolationReceipt {
+    calls: number;
+    /** False if any call observed a tool (other than structured output), an MCP server or a plugin. */
+    clean: boolean;
 }
 /** A model that can sit on the panel. Implemented per provider. */
 export interface Panelist {
@@ -174,6 +202,8 @@ export interface ConsensusRun {
         summary: string;
     };
     dropped: Record<string, string>;
+    /** Per-seat isolation evidence (panelist id -> receipt folded over every call, captain and judge included). */
+    isolation?: Record<string, SeatIsolation>;
 }
 export type ConsensusEvent = {
     type: "start";

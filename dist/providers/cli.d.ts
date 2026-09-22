@@ -13,6 +13,7 @@ export declare function runCommand(bin: string, args: string[], opts?: {
     cwd?: string;
     signal?: AbortSignal;
     timeoutMs?: number;
+    inherit?: boolean;
 }): Promise<RunResult>;
 /** Single-turn CLIs get the conversation flattened into one prompt. */
 export declare function flattenMessages(messages: ChatMessage[]): string;

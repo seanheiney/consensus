@@ -1,4 +1,5 @@
 import { TransientError } from "../types.js";
+import { foldIsolation } from "../providers/isolation.js";
 import { extractJson } from "./json.js";
 import { CritiqueSchema, ModerationSchema, RevisionSchema } from "./schemas.js";
 import { CAPTAIN_PROMPT, SYSTEM_PROMPT, critiquePrompt, moderatorPrompt, problemBlock, proposePrompt, revisePrompt, synthesizePrompt, debateLeak, standaloneRepairPrompt } from "./prompts.js";
@@ -53,6 +54,7 @@ function addUsage(a, b) {
     if (b.costUsd !== undefined)
         a.costUsd = (a.costUsd ?? 0) + b.costUsd;
 }
+const CLI_PROVIDERS = new Set(["claude", "codex", "gemini", "grok"]);
 function newRunId() {
     const d = new Date();
     const stamp = d.toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
@@ -156,6 +158,8 @@ export class ConsensusEngine {
             synthesis: "",
             usage: {},
             dropped: {},
+            // Shared with callWith, so a partial run saved on failure carries the receipts gathered so far.
+            isolation: (this.isolation = {}),
         };
         this.current = run;
         this.liveStates = states;
@@ -461,6 +465,7 @@ export class ConsensusEngine {
         }
     }
     retiredUsage = {};
+    isolation = {};
     completeFor(s, system, messages, phase, json, jsonSchema) {
         return s.panelist.complete({
             system,
@@ -491,6 +496,10 @@ export class ConsensusEngine {
             }
         }
         addUsage(s.usage, res.usage);
+        // API adapters attach no tools to their requests; CLI adapters return their own receipt.
+        const receipt = res.isolation ?? (CLI_PROVIDERS.has(s.panelist.provider) ? undefined : { route: "api", evidence: "request" });
+        if (receipt)
+            this.isolation[s.panelist.id] = foldIsolation(this.isolation[s.panelist.id], receipt);
         if (res.servedBy && res.servedBy !== s.panelist.model)
             this.emit({ type: "served-by", label: s.label, panelist: s.panelist.id, model: res.servedBy, phase: phase ?? "call" });
         if (phase === "propose" && res.reasoning)
