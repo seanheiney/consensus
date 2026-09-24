@@ -202,6 +202,8 @@ export interface ConsensusRun {
   dropped: Record<string, string>; // panelist id -> error
   /** Per-seat isolation evidence (panelist id -> receipt folded over every call, captain and judge included). */
   isolation?: Record<string, SeatIsolation>;
+  /** Set when a cheaper panel answered first and this run was promoted from it (opt-in --escalate). */
+  escalation?: { fromRunId: string; fromSeats: string[]; reason: string; firstPassConverged: boolean };
 }
 
 export type ConsensusEvent =

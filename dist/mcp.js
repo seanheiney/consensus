@@ -11,6 +11,7 @@ import { openDebateLog } from "./debatelog.js";
 import { scanVendors } from "./doctor.js";
 import { describeProfile } from "./profiles.js";
 import { ConsensusEngine } from "./protocol/engine.js";
+import { runWithEscalation } from "./escalate.js";
 import { isolationSummary } from "./providers/isolation.js";
 import { renderReport } from "./report.js";
 import { statusLine } from "./setup.js";
@@ -54,11 +55,15 @@ export function createMcpServer() {
             max_cost: z.number().positive().optional().describe("Abort once spend billed to API keys exceeds this many USD (default from the user's config)."),
             max_spend: z.number().positive().optional().describe("Abort once billed spend plus the list-price equivalent of subscription seats exceeds this many USD."),
             captain: z.string().optional().describe("Captain spec, 'auto' (default: best available model, as a separate thread even if a seat uses it), 'neutral' (prefer a vendor not on the panel) or 'none'. The captain moderates each round, referees disputes, facilitates, and writes the report."),
+            variants: z.number().int().min(2).max(8).optional().describe("Opt-in: seat the panel's model(s) this many times, each under a different reasoning angle. Lets one vendor hold a real debate; cheap and fast with a small model."),
+            task: z.enum(["code-review", "architecture", "debug", "security", "product", "estimate"]).optional().describe("Opt-in: seat the angles that suit this kind of work (also sets a sensible round count)."),
+            escalate_to: z.string().optional().describe("Opt-in: answer with the chosen panel first and, only if that leaves the question unsettled, re-run with this (stronger) profile seeded with the first answer. Cheap by default, expensive only when it matters."),
+            escalate_when: z.enum(["unsettled", "disputed", "always"]).optional().describe("When to promote (default 'unsettled': not converged, disputes left open, or confidence below high)."),
         },
         annotations: { title: "Panel consensus", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    }, async ({ prompt, context, profile, panel, rounds, effort, transcript, max_cost, max_spend, captain }, extra) => {
+    }, async ({ prompt, context, profile, panel, rounds, effort, transcript, max_cost, max_spend, captain, variants, task, escalate_to, escalate_when }, extra) => {
         const cfg = await loadConfig();
-        const r = await resolveRun({ cfg, panel, profile, rounds, effort, captain, env: credentialEnv() });
+        const r = await resolveRun({ cfg, panel, profile, rounds, effort, captain, variants, task, env: credentialEnv() });
         const runsDir = cfg.runsDir ?? ".consensus/runs";
         const token = extra._meta?.progressToken;
         let debate;
@@ -86,10 +91,28 @@ export function createMcpServer() {
                 void extra.sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: Math.min(step, total - 1), total, message: msg } }).catch(() => undefined);
             }
         };
-        const engine = new ConsensusEngine({ panel: r.panel, judge: r.judge, captain: r.captain, rounds: r.rounds, effort: r.effort, maxTokens: cfg.maxTokens, maxCostUsd: max_cost ?? cfg.maxCostUsd, maxSpendUsd: max_spend ?? cfg.maxSpendUsd, onEvent, signal: extra.signal });
+        const runOnce = (resolved, p, c) => {
+            const engine = new ConsensusEngine({ panel: resolved.panel, judge: resolved.judge, captain: resolved.captain, rounds: resolved.rounds, effort: resolved.effort, maxTokens: cfg.maxTokens, maxCostUsd: max_cost ?? cfg.maxCostUsd, maxSpendUsd: max_spend ?? cfg.maxSpendUsd, onEvent, signal: extra.signal });
+            return engine.run(p, c);
+        };
         let run;
         try {
-            run = await engine.run(prompt, context);
+            run = escalate_to
+                ? await runWithEscalation({
+                    first: r,
+                    when: escalate_when,
+                    prompt,
+                    context,
+                    resolveTarget: () => resolveRun({ cfg, profile: escalate_to, captain, effort, env: credentialEnv() }),
+                    onFirstPass: async (first) => {
+                        await debate?.close();
+                        debate = undefined;
+                        pending = [];
+                        await saveRun(first, runsDir).catch(() => "");
+                    },
+                    runOnce: (resolved, p, c) => runOnce(resolved, p, c),
+                })
+                : await runOnce(r, prompt, context);
         }
         catch (err) {
             await debate?.close();
@@ -127,6 +150,7 @@ export function createMcpServer() {
             `# Confidence\n\n${confidence || "(not stated)"}`,
             `# Unresolved disagreements\n\n${unresolved || "(none stated)"}`,
             `---`,
+            run.escalation ? `Escalated from ${run.escalation.fromSeats.join(", ")} because ${run.escalation.reason} (first pass: run ${run.escalation.fromRunId}).` : "",
             `Panel: ${seats}.${run.captain ? ` Captain: ${run.captain}.` : ""} ${run.converged ? `Converged after ${run.rounds.length} round(s).` : `Did not fully converge after ${run.rounds.length} round(s).`}${Object.keys(run.dropped).length ? ` Dropped: ${Object.keys(run.dropped).join(", ")}.` : ""}`,
             `Cost: ${describeCost(cost)}.`,
             isolationSummary(run.isolation) ?? "",

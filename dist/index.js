@@ -11,6 +11,8 @@ export { createCompatPanelist } from "./providers/compat.js";
 export { createClaudeCliPanelist, createCodexCliPanelist, createGeminiCliPanelist, createGrokCliPanelist } from "./providers/cli.js";
 export { CATALOG, PRESETS, STARTER_PROFILES } from "./catalog.js";
 export { PERSONAS, withPersona, resolvePersona } from "./personas.js";
+export { runWithEscalation, shouldEscalate, statedConfidence, openDisputes, escalationContext } from "./escalate.js";
+export { ANGLES, TASKS, expandVariants, expandTask, taskNames } from "./variants.js";
 export { runBench, renderBench, estimateCost, gradeCase, loadSuite, SAMPLE_SUITE, BenchSuiteSchema } from "./bench.js";
 export { buildPanel, splitMember, memberId, resolvePortableMembers, parseConfigLenient, configWarnings, autoCaptain, autoExternalJudge } from "./config.js";
 export { PackSchema, createPack, readPack, installPack, removePack, diffPack, describePack, portable, packSourceUrl } from "./packs.js";

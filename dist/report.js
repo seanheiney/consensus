@@ -38,6 +38,9 @@ export function renderReport(run, opts = {}) {
             lines.push(known ? `| ${id} | ${fmt(u.inputTokens)} | ${fmt(u.outputTokens)} |` : `| ${id} | n/a${CLI.has(provider) ? " (subscription CLI)" : ""} | n/a |`);
         }
     }
+    if (run.escalation) {
+        lines.push("", `_Escalated: a faster panel (${run.escalation.fromSeats.join(", ")}) answered first and ${run.escalation.reason}; this panel re-answered with that draft in hand. First pass: run ${run.escalation.fromRunId}._`);
+    }
     const iso = isolationSummary(run.isolation);
     if (iso) {
         lines.push("", `_${iso}_`);

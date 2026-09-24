@@ -11,6 +11,8 @@ import { configWarnings, splitMember } from "./config.js";
 import { ensureGitignore } from "./hosts.js";
 import { GROQ_PRICES, describeCost, estimateCost } from "./cost.js";
 import { setDefaultTimeout } from "./providers/cli.js";
+import { TASKS, taskNames } from "./variants.js";
+import { runWithEscalation } from "./escalate.js";
 import { describeIsolation, foldIsolation, seatEnv } from "./providers/isolation.js";
 import { probeSpecs, scanVendors } from "./doctor.js";
 import { installProjectMcp, installProjectSkills, listHosts, mcpLaunchCommand } from "./hosts.js";
@@ -109,6 +111,11 @@ program
     .option("-c, --context <path>", "extra context file (code, docs, constraints) appended to the problem")
     .option("-P, --profile <name>", "model profile to use (see `consensus profiles`)")
     .option("-p, --panel <specs>", "comma-separated panelists, e.g. claude,codex:gpt-5.6-sol,xai:grok-4.6#max")
+    .option("--escalate <profile>", "opt-in: answer with the chosen panel first, and only if it leaves the question unsettled, run it again with this (stronger) profile, seeded with the first answer")
+    .option("--escalate-when <rule>", "when to promote: unsettled (default: not converged, disputes left, or confidence below high), disputed (only open disputes), always", (v) => { if (!["unsettled", "disputed", "always"].includes(v))
+    throw new InvalidArgumentError("expected unsettled, disputed or always"); return v; })
+    .option("--variants <n>", "opt-in: seat the panel's model(s) n times, each under a different reasoning angle (works with a single subscription)", parseIntArg)
+    .option("--for <task>", `opt-in: seat the angles that suit a kind of work (${taskNames()})`)
     .option("--captain <spec|auto|neutral|none>", "captain: moderates after each critique round, referees disputes, facilitates, writes the report (default auto = best available model, even if a seat uses it, as a separate thread; neutral = prefer a vendor not on the panel)")
     .option("-j, --judge <spec>", "override who writes the synthesis: a seat spec or `external:<spec>` (default: the captain)")
     .option("-r, --rounds <n>", "max critique/revise rounds", parseIntArg)
@@ -150,6 +157,8 @@ program
         captain: o.captain,
         rounds: o.rounds,
         effort: o.effort,
+        variants: o.variants,
+        task: o.for,
         env: credentialEnv(),
     });
     const problems = preflight(r.panel, await _scan(credentialEnv()), credentialEnv());
@@ -167,7 +176,8 @@ program
         const shellKeys = [["claude", "ANTHROPIC_API_KEY"], ["codex", "OPENAI_API_KEY"], ["gemini", "GEMINI_API_KEY"], ["grok", "XAI_API_KEY"]].filter(([p, k]) => process.env[k] && r.panel.some((x) => x.provider === p));
         for (const [p, k] of shellKeys)
             log(yellow(`note: ${k} is set in your shell, so the ${p} seat will bill that API key, not your subscription`));
-        log(dim(`panel${r.profile ? ` (${r.profile})` : ` (${r.source})`}: ${seats}`));
+        const shapeNote = r.shaped?.task ? ` — ${r.shaped.task}: ${TASKS[r.shaped.task]?.description ?? ""}` : r.shaped?.variants ? ` — ${r.shaped.variants} prompt variants of the same model(s)` : "";
+        log(dim(`panel${r.profile ? ` (${r.profile})` : ` (${r.source})`}: ${seats}${shapeNote}`));
         const onPanel = r.panel.some((x) => x.id === r.judge.id);
         if (r.captain)
             log(dim(`captain: ${r.captain.id}${r.panel.some((x) => x.model === r.captain.model && x.provider === r.captain.provider) ? " (same model as a seat, separate thread)" : " (not on the panel)"}: moderates each round, referees disputes, may grant one extra round, writes the report`));
@@ -211,23 +221,57 @@ program
     };
     if (o.timeout)
         setDefaultTimeout(o.timeout * 60_000);
-    const engine = new ConsensusEngine({
-        panel: r.panel,
-        judge: r.judge,
-        captain: r.captain,
-        rounds: r.rounds,
-        effort: r.effort,
-        maxTokens: o.maxTokens ?? cfg.maxTokens,
-        maxCostUsd: o.maxCost ?? cfg.maxCostUsd,
-        maxSpendUsd: o.maxSpend ?? cfg.maxSpendUsd,
-        retry: o.retry !== false,
-        seed: o.seed,
-        onEvent,
-        signal: ac.signal,
-    });
+    /** One debate with one panel. Escalation calls this twice, with its own debate log each time. */
+    const runOnce = async (resolved, p, c) => {
+        await debate?.close();
+        debate = undefined;
+        pending = [];
+        const engine = new ConsensusEngine({
+            panel: resolved.panel,
+            judge: resolved.judge,
+            captain: resolved.captain,
+            rounds: resolved.rounds,
+            effort: resolved.effort,
+            maxTokens: o.maxTokens ?? cfg.maxTokens,
+            maxCostUsd: o.maxCost ?? cfg.maxCostUsd,
+            maxSpendUsd: o.maxSpend ?? cfg.maxSpendUsd,
+            retry: o.retry !== false,
+            seed: o.seed,
+            onEvent,
+            signal: ac.signal,
+        });
+        return engine.run(p, c);
+    };
     let run;
     try {
-        run = await engine.run(prompt, context);
+        run = o.escalate
+            ? await runWithEscalation({
+                first: r,
+                when: o.escalateWhen,
+                prompt,
+                context,
+                resolveTarget: async () => {
+                    const target = await resolveRun({ cfg, profile: String(o.escalate), captain: o.captain, effort: o.effort, env: credentialEnv() });
+                    if (!o.quiet)
+                        log(dim(`escalating to ${String(o.escalate)}: ${target.panel.map((x) => x.id).join(", ")}`));
+                    return target;
+                },
+                onDecision: (d, first) => {
+                    if (o.quiet)
+                        return;
+                    log(dim(d.escalate ? `first pass (${first.seats.length} seats) unsettled: ${d.reason}` : `first pass settled it: ${d.reason} — not escalating`));
+                },
+                onFirstPass: async (first) => {
+                    await debate?.close();
+                    if (o.save !== false) {
+                        const dir = await saveRun(first, cfg.runsDir).catch(() => "");
+                        if (dir && !o.quiet)
+                            log(dim(`first pass saved ${dir}`));
+                    }
+                },
+                runOnce: (resolved, p, c) => runOnce(resolved, p, c),
+            })
+            : await runOnce(r, prompt, context);
     }
     catch (err) {
         await debate?.close();

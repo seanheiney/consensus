@@ -8,6 +8,7 @@ import { CATALOG, CATALOG_VENDORS, findCatalogModel, pickSeatable, routeFor, spe
 import { formatSpec } from "./providers/index.js";
 import { scanVendors } from "./doctor.js";
 import { withFallbacks } from "./fallback.js";
+import { TASKS, expandTask, expandVariants } from "./variants.js";
 const EffortSchema = z.enum(["low", "medium", "high", "xhigh", "max"]);
 /**
  * A panel member: a model spec string `provider[:model][#effort][+persona]`,
@@ -314,6 +315,16 @@ function hasPortable(members) {
  * Auto-detect prefers a logged-in vendor CLI (subscription) over that vendor's API key.
  */
 export async function resolveRun(o) {
+    const r = await resolveRunInner(o);
+    // A task preset carries its own round count; an explicit --rounds still wins.
+    if (o.task && o.rounds === undefined) {
+        const preset = TASKS[o.task];
+        if (preset?.rounds)
+            return { ...r, rounds: preset.rounds };
+    }
+    return r;
+}
+async function resolveRunInner(o) {
     const env = o.env ?? process.env;
     const cfg = o.cfg;
     const library = cfg.personas ?? {};
@@ -349,7 +360,16 @@ export async function resolveRun(o) {
         }
         return withFallbacks(built, o.onCaptainSwitch);
     };
-    const concrete = async (members) => (hasPortable(members) ? resolvePortableMembers(members, await scan()) : members);
+    const shaped = o.task || o.variants ? { task: o.task, variants: o.variants } : undefined;
+    /** Resolve portable `any:` seats, then apply --for / --variants if either was asked for. */
+    const concrete = async (members) => {
+        let out = hasPortable(members) ? resolvePortableMembers(members, await scan()) : members;
+        if (o.task)
+            out = expandTask(out, o.task).members;
+        if (o.variants)
+            out = expandVariants(out, o.variants);
+        return out;
+    };
     const concreteJudge = async (spec, members) => {
         if (!spec)
             return spec;
@@ -373,7 +393,7 @@ export async function resolveRun(o) {
         const captain = await makeCaptain(o.captain ?? cfg.captain, members, o.effort ?? cfg.effort);
         const judgeSpec = o.judge ?? cfg.judge;
         const { panel, judge } = buildPanel(members, o.effort ?? cfg.effort, await concreteJudge(judgeSpec, members), env, library);
-        return { panel, judge: judgeSpec ? judge : (captain ?? judge), captain, rounds: o.rounds ?? cfg.rounds ?? 3, effort: o.effort ?? cfg.effort ?? "high", source: "flags" };
+        return { panel, judge: judgeSpec ? judge : (captain ?? judge), captain, rounds: o.rounds ?? cfg.rounds ?? 3, effort: o.effort ?? cfg.effort ?? "high", source: "flags", shaped };
     }
     const profileName = o.profile ?? cfg.profile;
     if (profileName) {
@@ -387,23 +407,28 @@ export async function resolveRun(o) {
         const captain = await makeCaptain(o.captain ?? prof.captain ?? cfg.captain, members, effort);
         const judgeSpec = o.judge ?? prof.judge;
         const { panel, judge } = buildPanel(members, effort, await concreteJudge(judgeSpec, members), env, { ...library, ...prof.personas });
-        return { panel, judge: judgeSpec ? judge : (captain ?? judge), captain, rounds: o.rounds ?? prof.rounds ?? cfg.rounds ?? 3, effort, profile: profileName, source: "profile" };
+        return { panel, judge: judgeSpec ? judge : (captain ?? judge), captain, rounds: o.rounds ?? prof.rounds ?? cfg.rounds ?? 3, effort, profile: profileName, source: "profile", shaped };
     }
     if (cfg.panel?.length) {
         const members = await concrete(cfg.panel);
         const captain = await makeCaptain(o.captain ?? cfg.captain, members, o.effort ?? cfg.effort);
         const judgeSpec = o.judge ?? cfg.judge;
         const { panel, judge } = buildPanel(members, o.effort ?? cfg.effort, await concreteJudge(judgeSpec, members), env, library);
-        return { panel, judge: judgeSpec ? judge : (captain ?? judge), captain, rounds: o.rounds ?? cfg.rounds ?? 3, effort: o.effort ?? cfg.effort ?? "high", source: "config" };
+        return { panel, judge: judgeSpec ? judge : (captain ?? judge), captain, rounds: o.rounds ?? cfg.rounds ?? 3, effort: o.effort ?? cfg.effort ?? "high", source: "config", shaped };
     }
     const specs = await autoDetectSpecs(env);
-    if (specs.length < 2) {
-        throw new Error(`Need at least 2 connected models, found ${specs.length}. Run \`consensus setup\` to connect your subscriptions or add API keys, or pass --panel.`);
+    // One connection is enough when the seats are prompt variants of it (--variants / --for).
+    const minimum = o.variants || o.task ? 1 : 2;
+    if (specs.length < minimum) {
+        throw new Error(`Need at least ${minimum} connected model${minimum === 1 ? "" : "s"}, found ${specs.length}. Run \`consensus setup\` to connect your subscriptions or add API keys, or pass --panel.`);
     }
-    const captain = await makeCaptain(o.captain ?? cfg.captain, specs, o.effort ?? cfg.effort);
+    if (specs.length === 1 && minimum === 2)
+        throw new Error("Need at least 2 connected models, found 1. Connect another vendor, or debate one model against itself with --variants 4 / --for <task>.");
+    const members = await concrete(specs);
+    const captain = await makeCaptain(o.captain ?? cfg.captain, members, o.effort ?? cfg.effort);
     const judgeSpec = o.judge ?? cfg.judge;
-    const { panel, judge } = buildPanel(specs, o.effort ?? cfg.effort, await concreteJudge(judgeSpec, specs), env, library);
-    return { panel, judge: judgeSpec ? judge : (captain ?? judge), captain, rounds: o.rounds ?? cfg.rounds ?? 3, effort: o.effort ?? cfg.effort ?? "high", source: "auto" };
+    const { panel, judge } = buildPanel(members, o.effort ?? cfg.effort, await concreteJudge(judgeSpec, members), env, library);
+    return { panel, judge: judgeSpec ? judge : (captain ?? judge), captain, rounds: o.rounds ?? cfg.rounds ?? 3, effort: o.effort ?? cfg.effort ?? "high", source: "auto", shaped };
 }
 /**
  * One spec per reachable vendor: its logged-in CLI, else its API key, else
