@@ -22,7 +22,7 @@ export interface CompletionRequest {
     effort?: Effort;
     signal?: AbortSignal;
     /** Which step of the protocol this call serves. */
-    phase?: "propose" | "critique" | "revise" | "moderate" | "synthesize" | "grade" | "probe";
+    phase?: "propose" | "critique" | "revise" | "moderate" | "synthesize" | "verify" | "grade" | "probe";
 }
 export interface Usage {
     inputTokens: number;
@@ -139,6 +139,18 @@ export interface Moderation {
     /** After round 1: the remaining disputes will not move, so skip further revision and write the report. */
     stop_debate?: boolean;
 }
+/** One load-bearing claim of the report, checked against the material the panel was given. */
+export interface VerifiedClaim {
+    claim: string;
+    support: "supported" | "contradicted" | "unsupported";
+    evidence: string;
+}
+/** Result of the opt-in grounding pass (--verify). */
+export interface Verification {
+    by: string;
+    claims: VerifiedClaim[];
+    note: string;
+}
 export interface Revision {
     responses: {
         from: string;
@@ -204,6 +216,10 @@ export interface ConsensusRun {
     dropped: Record<string, string>;
     /** Per-seat isolation evidence (panelist id -> receipt folded over every call, captain and judge included). */
     isolation?: Record<string, SeatIsolation>;
+    /** Stable key for (question, context, panel, rounds, effort); used by the opt-in --reuse. */
+    key?: string;
+    /** Grounding pass over the final report, when --verify asked for one. */
+    verification?: Verification;
     /** Set when a cheaper panel answered first and this run was promoted from it (opt-in --escalate). */
     escalation?: {
         fromRunId: string;
@@ -223,7 +239,7 @@ export type ConsensusEvent = {
     effort: Effort;
 } | {
     type: "phase";
-    phase: "propose" | "critique" | "revise" | "synthesize";
+    phase: "propose" | "critique" | "revise" | "synthesize" | "verify";
     round?: number;
 } | {
     type: "proposal";
@@ -247,6 +263,10 @@ export type ConsensusEvent = {
     type: "synthesis";
     panelist: string;
     text: string;
+} | {
+    type: "verification";
+    panelist: string;
+    verification: Verification;
 } | {
     type: "moderation";
     panelist: string;
@@ -317,6 +337,8 @@ export interface ConsensusOptions {
     maxCostUsd?: number;
     /** Abort once billed spend plus the list-price equivalent of subscription seats exceeds this. */
     maxSpendUsd?: number;
+    /** Opt-in: after the report, check its load-bearing claims against the problem and context given. */
+    verify?: boolean;
     /** Retry a seat once on a transient failure (rate limit, overload, timeout). Default true. */
     retry?: boolean;
     /** Seed for label assignment and answer ordering; recorded in run.json so a run's shuffles are reproducible. */

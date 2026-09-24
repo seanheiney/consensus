@@ -1,6 +1,8 @@
 export { ConsensusEngine, runConsensus } from "./protocol/engine.js";
 export { renderReport, renderTranscript } from "./report.js";
-export { saveRun, listRuns, loadRun } from "./store.js";
+export { saveRun, listRuns, loadRun, findReusableRun } from "./store.js";
+export { runKey, type RunKeyParts } from "./runkey.js";
+export { renderAdr, adrSlug, adrTitle, nextAdrNumber, DEFAULT_ADR_DIR } from "./adr.js";
 export { openDebateLog, eventToMarkdown, eventToTerminal } from "./debatelog.js";
 export { loadConfig, loadUserConfig, saveUserConfig, resolveRun, autoDetectSpecs, ConfigSchema, ProfileSchema, type Config, type Profile } from "./config.js";
 export { PROVIDERS, VENDORS, createPanelist, detectApiProviders, detectCliProviders, parseSpec, formatSpec, specId } from "./providers/index.js";

@@ -38,6 +38,18 @@ export function renderReport(run, opts = {}) {
             lines.push(known ? `| ${id} | ${fmt(u.inputTokens)} | ${fmt(u.outputTokens)} |` : `| ${id} | n/a${CLI.has(provider) ? " (subscription CLI)" : ""} | n/a |`);
         }
     }
+    const v = run.verification;
+    if (v) {
+        const n = (k) => v.claims.filter((c) => c.support === k).length;
+        lines.push("", `_Grounding check by ${v.by}: ${v.claims.length} load-bearing claim${v.claims.length === 1 ? "" : "s"} checked against the problem and the context given — ${n("supported")} supported, ${n("contradicted")} contradicted, ${n("unsupported")} not established by that material._`);
+        const flagged = v.claims.filter((c) => c.support !== "supported");
+        for (const c of flagged)
+            lines.push(`- **${c.support}**: ${c.claim}${c.evidence ? ` — ${c.evidence}` : ""}`);
+        if (v.note)
+            lines.push(`- _${v.note}_`);
+        if (!v.claims.length && !v.note)
+            lines.push("- _No load-bearing claims were extracted._");
+    }
     if (run.escalation) {
         lines.push("", `_Escalated: a faster panel (${run.escalation.fromSeats.join(", ")}) answered first and ${run.escalation.reason}; this panel re-answered with that draft in hand. First pass: run ${run.escalation.fromRunId}._`);
     }

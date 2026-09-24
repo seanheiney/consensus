@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as p from "@clack/prompts";
 import { Command, InvalidArgumentError } from "commander";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { CATALOG, CATALOG_VENDORS, directRouteBlocker, priceLabel, routeFor } from "./catalog.js";
 import { loadConfig, loadUserConfig, resolveRun, saveUserConfig } from "./config.js";
@@ -13,6 +13,8 @@ import { GROQ_PRICES, describeCost, estimateCost } from "./cost.js";
 import { setDefaultTimeout } from "./providers/cli.js";
 import { TASKS, taskNames } from "./variants.js";
 import { runWithEscalation } from "./escalate.js";
+import { runKey } from "./runkey.js";
+import { DEFAULT_ADR_DIR, adrSlug, nextAdrNumber, renderAdr } from "./adr.js";
 import { describeIsolation, foldIsolation, seatEnv } from "./providers/isolation.js";
 import { probeSpecs, scanVendors } from "./doctor.js";
 import { installProjectMcp, installProjectSkills, listHosts, mcpLaunchCommand } from "./hosts.js";
@@ -26,7 +28,7 @@ import { scanVendors as _scan } from "./doctor.js";
 import { ConsensusEngine } from "./protocol/engine.js";
 import { renderReport } from "./report.js";
 import { connectVendor, runSetup, statusLine } from "./setup.js";
-import { listRuns, loadRun, saveRun } from "./store.js";
+import { findReusableRun, listRuns, loadRun, saveRun } from "./store.js";
 import { eventToTerminal, openDebateLog } from "./debatelog.js";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -111,6 +113,9 @@ program
     .option("-c, --context <path>", "extra context file (code, docs, constraints) appended to the problem")
     .option("-P, --profile <name>", "model profile to use (see `consensus profiles`)")
     .option("-p, --panel <specs>", "comma-separated panelists, e.g. claude,codex:gpt-5.6-sol,xai:grok-4.6#max")
+    .option("--reuse [days]", "opt-in: if this exact question was already put to this exact panel within N days (default 30), print that saved answer instead of debating again", (v) => { const n = Number(v); if (!(n > 0))
+    throw new InvalidArgumentError("must be a positive number of days"); return n; })
+    .option("--verify", "opt-in: after the report, check its load-bearing claims against the problem and context you supplied, and list what that material does not establish")
     .option("--escalate <profile>", "opt-in: answer with the chosen panel first, and only if it leaves the question unsettled, run it again with this (stronger) profile, seeded with the first answer")
     .option("--escalate-when <rule>", "when to promote: unsettled (default: not converged, disputes left, or confidence below high), disputed (only open disputes), always", (v) => { if (!["unsettled", "disputed", "always"].includes(v))
     throw new InvalidArgumentError("expected unsettled, disputed or always"); return v; })
@@ -187,6 +192,22 @@ program
         log(dim(`judge: ${r.judge.id}${onPanel ? "" : " (external, did not debate)"}  rounds: ${r.rounds}  cost: ${cliSeats === r.panel.length ? "subscription quota" : cliSeats ? "subscription quota + API tokens" : "API tokens"}; up to ${r.panel.length * (1 + 2 * r.rounds) + 1 + (r.captain ? r.rounds : 0)} model calls${ceilings ? `; ${ceilings}` : ""}`));
         log(dim(`expect roughly ${est.low === est.high ? `${est.low}` : `${est.low}–${est.high}`} minute${est.high === 1 ? "" : "s"} (seats run in parallel; each round adds a critique, a captain brief and, if anything is disputed, a revision; judgment questions at high effort take the longest)`));
     }
+    if (o.reuse) {
+        const days = typeof o.reuse === "number" ? o.reuse : 30;
+        const key = runKey({ prompt, context, seats: r.panel.map((x) => x.id), rounds: r.rounds, effort: r.effort });
+        const hit = await findReusableRun(key, days, cfg.runsDir);
+        if (hit) {
+            if (!o.quiet)
+                log(dim(`reusing run ${hit.run.id} from ${hit.ageDays < 1 ? "today" : `${Math.round(hit.ageDays)} day(s) ago`}: same question, same panel. Drop --reuse to debate it again.`));
+            const text = o.json ? JSON.stringify(hit.run, null, 2) : renderReport(hit.run, { transcript: o.transcript });
+            process.stdout.write(text + "\n");
+            if (o.output)
+                await writeFile(o.output, text + "\n");
+            return;
+        }
+        if (!o.quiet)
+            log(dim(`no saved answer to this exact question from this panel in the last ${days} day(s); debating it`));
+    }
     const ac = new AbortController();
     process.once("SIGINT", () => {
         log(yellow("\naborting…"));
@@ -236,6 +257,7 @@ program
             maxCostUsd: o.maxCost ?? cfg.maxCostUsd,
             maxSpendUsd: o.maxSpend ?? cfg.maxSpendUsd,
             retry: o.retry !== false,
+            verify: !!o.verify,
             seed: o.seed,
             onEvent,
             signal: ac.signal,
@@ -305,6 +327,30 @@ program
         if (!o.quiet)
             log(dim(`saved ${dir}`));
     }
+});
+// ---- adr -----------------------------------------------------------------
+program
+    .command("adr")
+    .description("write a run up as an architecture decision record in your repo")
+    .argument("[run]", "run id (default: the most recent run)")
+    .option("-d, --dir <path>", `directory for decision records (default ${DEFAULT_ADR_DIR})`)
+    .option("-s, --status <status>", "status line: Proposed, Accepted, Superseded... (default Proposed)")
+    .option("--stdout", "print the record instead of writing a file")
+    .action(async (id, o) => {
+    const cfg = await loadConfig();
+    const { run, dir: runDir } = await loadRun(id, cfg.runsDir);
+    const dir = o.dir ?? DEFAULT_ADR_DIR;
+    const number = await nextAdrNumber(dir);
+    const text = renderAdr(run, { number, status: o.status, runDir });
+    if (o.stdout) {
+        process.stdout.write(text);
+        return;
+    }
+    const file = join(dir, `${String(number).padStart(4, "0")}-${adrSlug(run.prompt)}.md`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(file, text);
+    log(`wrote ${file}`);
+    log(dim("commit it with the change it justifies; `consensus adr --status Accepted` once it ships"));
 });
 // ---- runs / log ----------------------------------------------------------
 program

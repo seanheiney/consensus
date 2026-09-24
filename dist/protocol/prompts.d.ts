@@ -67,3 +67,9 @@ export declare function synthesizePrompt(args: {
 /** The first offending debate reference inside the "# Answer" section of a synthesis, if any. */
 export declare function debateLeak(synthesis: string): string | undefined;
 export declare function standaloneRepairPrompt(leak: string): string;
+/** Grounding pass: check the report's load-bearing claims against the material the panel was given. */
+export declare function verifyPrompt(args: {
+    prompt: string;
+    context?: string;
+    synthesis: string;
+}): string;

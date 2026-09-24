@@ -49,6 +49,35 @@ export async function listRuns(dir = ".consensus/runs") {
     }
     return out;
 }
+/**
+ * The newest saved run that answered this exact question with this exact panel,
+ * within `maxAgeDays`. Used by `--reuse`; never consulted unless asked.
+ */
+export async function findReusableRun(key, maxAgeDays, dir = ".consensus/runs") {
+    let names;
+    try {
+        names = await readdir(dir);
+    }
+    catch {
+        return undefined;
+    }
+    const cutoff = Date.now() - maxAgeDays * 86_400_000;
+    for (const id of names.sort().reverse()) {
+        try {
+            const run = JSON.parse(await readFile(join(dir, id, "run.json"), "utf8"));
+            if (run.key !== key || !run.synthesis)
+                continue;
+            const when = Date.parse(run.finishedAt ?? run.startedAt);
+            if (!Number.isFinite(when) || when < cutoff)
+                continue;
+            return { run, dir: join(dir, id), ageDays: (Date.now() - when) / 86_400_000 };
+        }
+        catch {
+            /* in-progress or broken run dir */
+        }
+    }
+    return undefined;
+}
 /** Load one run by id, or the latest when id is "latest" / omitted. */
 export async function loadRun(id, dir = ".consensus/runs") {
     let target = id;

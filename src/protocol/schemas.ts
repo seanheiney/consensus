@@ -96,3 +96,21 @@ export const REVISION_SHAPE = `{
   "position_changed": true | false,
   "answer": "<your full revised answer in markdown>"
 }`;
+
+/**
+ * Grounding check on the final report: each load-bearing claim against the
+ * problem and the context the panel was given, and nothing else.
+ */
+export const VerificationSchema = z.object({
+  claims: z
+    .array(
+      z.object({
+        claim: str,
+        support: z.enum(["supported", "contradicted", "unsupported"]),
+        /** Quote or reference from the provided material; empty when nothing supports it. */
+        evidence: str.default(""),
+      }),
+    )
+    .default([]),
+  note: str.default(""),
+});

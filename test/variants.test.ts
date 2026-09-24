@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ConsensusEngine } from "../src/protocol/engine.js";
 import { escalationContext, openDisputes, runWithEscalation, shouldEscalate, statedConfidence } from "../src/escalate.js";
 import { expandTask, expandVariants, TASKS } from "../src/variants.js";
+import { renderReport } from "../src/report.js";
 import { agreeAll, disagreeAll, fakePanelist, phaseOf, revision } from "./fake.js";
 import type { CompletionRequest, ConsensusRun } from "../src/types.js";
 
@@ -159,10 +160,53 @@ describe("runWithEscalation", () => {
         return new ConsensusEngine({ panel: (r as { panel: never[] }).panel, rounds: 1 }).run(p, c);
       },
     });
-    expect(run.escalation).toMatchObject({ fromSeats: ["cheap:1", "cheap:2"], firstPassConverged: false });
+    // Seat order is shuffled for anonymity, so compare as a set.
+    expect([...run.escalation!.fromSeats].sort()).toEqual(["cheap:1", "cheap:2"]);
+    expect(run.escalation).toMatchObject({ firstPassConverged: false });
     expect(run.escalation!.reason).toMatch(/did not converge/);
     expect(contexts[0]).toBe("USER CONTEXT");
     expect(contexts[1]).toContain("A faster panel's first pass");
     expect(contexts[1]).toContain("USER CONTEXT");
+  });
+});
+
+describe("grounding check (--verify)", () => {
+  const script = (req: CompletionRequest): string => {
+    switch (phaseOf(req)) {
+      case "critique":
+        return agreeAll(req);
+      case "verify":
+        return JSON.stringify({
+          claims: [
+            { claim: "Postgres advisory locks are session-scoped", support: "supported", evidence: "the pasted docs say so" },
+            { claim: "throughput is 10k writes/s", support: "unsupported", evidence: "" },
+          ],
+          note: "",
+        });
+      case "synthesize":
+        return "# Answer\n\nUse advisory locks.\n\n# Confidence\n\nHigh.\n";
+      default:
+        return "answer";
+    }
+  };
+
+  it("records what the given material establishes and flags what it does not", async () => {
+    const run = await new ConsensusEngine({ panel: [fakePanelist("a:m", script), fakePanelist("b:m", script)], rounds: 1, verify: true }).run("q", "PASTED DOCS");
+    expect(run.verification).toMatchObject({ by: "a:m", claims: [{ support: "supported" }, { claim: "throughput is 10k writes/s", support: "unsupported" }] });
+    const report = renderReport(run);
+    expect(report).toContain("2 load-bearing claims checked");
+    expect(report).toContain("**unsupported**: throughput is 10k writes/s");
+    expect(report).not.toContain("**supported**: Postgres advisory locks");
+  });
+
+  it("does not run unless asked, and never costs the panel its answer when it fails", async () => {
+    const noVerify = await new ConsensusEngine({ panel: [fakePanelist("a:m", script), fakePanelist("b:m", script)], rounds: 1 }).run("q");
+    expect(noVerify.verification).toBeUndefined();
+
+    const broken = (req: CompletionRequest) => (phaseOf(req) === "verify" ? "not json at all" : script(req));
+    const run = await new ConsensusEngine({ panel: [fakePanelist("a:m", broken), fakePanelist("b:m", broken)], rounds: 1, verify: true }).run("q");
+    expect(run.synthesis).toContain("# Answer");
+    expect(run.verification!.note).toMatch(/verification did not complete/);
+    expect(run.verification!.claims).toEqual([]);
   });
 });

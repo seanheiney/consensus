@@ -1,8 +1,9 @@
 import { TransientError } from "../types.js";
 import { foldIsolation } from "../providers/isolation.js";
+import { runKey } from "../runkey.js";
 import { extractJson } from "./json.js";
-import { CritiqueSchema, ModerationSchema, RevisionSchema } from "./schemas.js";
-import { CAPTAIN_PROMPT, SYSTEM_PROMPT, critiquePrompt, moderatorPrompt, problemBlock, proposePrompt, revisePrompt, synthesizePrompt, debateLeak, standaloneRepairPrompt } from "./prompts.js";
+import { CritiqueSchema, ModerationSchema, RevisionSchema, VerificationSchema } from "./schemas.js";
+import { CAPTAIN_PROMPT, SYSTEM_PROMPT, critiquePrompt, moderatorPrompt, problemBlock, proposePrompt, revisePrompt, synthesizePrompt, verifyPrompt, debateLeak, standaloneRepairPrompt } from "./prompts.js";
 import { z } from "zod";
 import { CostLimitError, describeCost, estimateCost } from "../cost.js";
 const TRANSIENT = /429|rate.?limit|overloaded|529|503|timeout|timed out|ECONNRESET|EPIPE|temporar|try again|SIGTERM/i;
@@ -149,6 +150,7 @@ export class ConsensusEngine {
                 persona: s.panelist.persona,
                 billing: s.panelist.billing,
             })),
+            key: runKey({ prompt, context, seats: states.map((s) => s.panelist.id), rounds, effort }),
             proposals: {},
             rounds: [],
             finalAnswers: {},
@@ -325,6 +327,19 @@ export class ConsensusEngine {
         }
         run.synthesis = synthesis.trim();
         this.emit({ type: "synthesis", panelist: writer.panelist.id, text: run.synthesis });
+        // Opt-in grounding pass: which of the report's claims the given material actually establishes.
+        if (this.opts.verify && !this.opts.signal?.aborted) {
+            this.emit({ type: "phase", phase: "verify" });
+            try {
+                const checked = await this.callJson(writer, [{ role: "user", content: verifyPrompt({ prompt, context, synthesis: run.synthesis }) }], VerificationSchema, "verify");
+                run.verification = { by: writer.panelist.id, claims: checked.claims, note: checked.note };
+                this.emit({ type: "verification", panelist: writer.panelist.id, verification: run.verification });
+            }
+            catch (err) {
+                // A failed check must not cost the panel its answer; the report says the pass did not complete.
+                run.verification = { by: writer.panelist.id, claims: [], note: `verification did not complete: ${err.message.split("\n")[0]}` };
+            }
+        }
         for (const s of states)
             if (s.usage.reported)
                 run.usage[s.panelist.id] = { ...s.usage, reported: undefined, billing: s.panelist.billing };

@@ -12,6 +12,15 @@ export interface RunSummary {
 }
 /** Saved runs, newest first. */
 export declare function listRuns(dir?: string): Promise<RunSummary[]>;
+/**
+ * The newest saved run that answered this exact question with this exact panel,
+ * within `maxAgeDays`. Used by `--reuse`; never consulted unless asked.
+ */
+export declare function findReusableRun(key: string, maxAgeDays: number, dir?: string): Promise<{
+    run: ConsensusRun;
+    dir: string;
+    ageDays: number;
+} | undefined>;
 /** Load one run by id, or the latest when id is "latest" / omitted. */
 export declare function loadRun(id: string | undefined, dir?: string): Promise<{
     run: ConsensusRun;

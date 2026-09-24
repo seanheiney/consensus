@@ -59,9 +59,10 @@ export function createMcpServer() {
             task: z.enum(["code-review", "architecture", "debug", "security", "product", "estimate"]).optional().describe("Opt-in: seat the angles that suit this kind of work (also sets a sensible round count)."),
             escalate_to: z.string().optional().describe("Opt-in: answer with the chosen panel first and, only if that leaves the question unsettled, re-run with this (stronger) profile seeded with the first answer. Cheap by default, expensive only when it matters."),
             escalate_when: z.enum(["unsettled", "disputed", "always"]).optional().describe("When to promote (default 'unsettled': not converged, disputes left open, or confidence below high)."),
+            verify: z.boolean().optional().describe("Opt-in: after the report, check its load-bearing claims against the prompt and context you supplied, and return which ones that material does not establish. Useful when the panel is reasoning over pasted code or docs."),
         },
         annotations: { title: "Panel consensus", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    }, async ({ prompt, context, profile, panel, rounds, effort, transcript, max_cost, max_spend, captain, variants, task, escalate_to, escalate_when }, extra) => {
+    }, async ({ prompt, context, profile, panel, rounds, effort, transcript, max_cost, max_spend, captain, variants, task, escalate_to, escalate_when, verify }, extra) => {
         const cfg = await loadConfig();
         const r = await resolveRun({ cfg, panel, profile, rounds, effort, captain, variants, task, env: credentialEnv() });
         const runsDir = cfg.runsDir ?? ".consensus/runs";
@@ -92,7 +93,7 @@ export function createMcpServer() {
             }
         };
         const runOnce = (resolved, p, c) => {
-            const engine = new ConsensusEngine({ panel: resolved.panel, judge: resolved.judge, captain: resolved.captain, rounds: resolved.rounds, effort: resolved.effort, maxTokens: cfg.maxTokens, maxCostUsd: max_cost ?? cfg.maxCostUsd, maxSpendUsd: max_spend ?? cfg.maxSpendUsd, onEvent, signal: extra.signal });
+            const engine = new ConsensusEngine({ panel: resolved.panel, judge: resolved.judge, captain: resolved.captain, rounds: resolved.rounds, effort: resolved.effort, maxTokens: cfg.maxTokens, maxCostUsd: max_cost ?? cfg.maxCostUsd, maxSpendUsd: max_spend ?? cfg.maxSpendUsd, verify: !!verify, onEvent, signal: extra.signal });
             return engine.run(p, c);
         };
         let run;
@@ -153,6 +154,7 @@ export function createMcpServer() {
             run.escalation ? `Escalated from ${run.escalation.fromSeats.join(", ")} because ${run.escalation.reason} (first pass: run ${run.escalation.fromRunId}).` : "",
             `Panel: ${seats}.${run.captain ? ` Captain: ${run.captain}.` : ""} ${run.converged ? `Converged after ${run.rounds.length} round(s).` : `Did not fully converge after ${run.rounds.length} round(s).`}${Object.keys(run.dropped).length ? ` Dropped: ${Object.keys(run.dropped).join(", ")}.` : ""}`,
             `Cost: ${describeCost(cost)}.`,
+            run.verification ? `Grounding check: ${run.verification.claims.filter((c) => c.support === "supported").length}/${run.verification.claims.length} load-bearing claims are established by the material you supplied; ${run.verification.claims.filter((c) => c.support === "contradicted").length} contradicted. Full list in the report.` : "",
             isolationSummary(run.isolation) ?? "",
             saved ? `Full debate: ${saved}/debate.md  (or \`consensus log ${run.id}\`). Call again with transcript=true for the whole report.` : "",
         ]
