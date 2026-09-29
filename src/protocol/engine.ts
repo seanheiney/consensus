@@ -335,7 +335,7 @@ export class ConsensusEngine {
             lastCritiques,
             moderations: run.rounds.filter((rr) => rr.moderation).map((rr) => ({ round: rr.round, moderation: rr.moderation! })),
             revisions: run.rounds.flatMap((rr) =>
-              Object.entries(rr.revisions ?? {}).map(([label, rev]) => ({
+              Object.entries(rr.revisions ?? {}).filter(([label]) => ![...this.tainted].some((t) => t.label === label)).map(([label, rev]) => ({
                 round: rr.round,
                 label,
                 positionChanged: rev.position_changed,
@@ -343,56 +343,65 @@ export class ConsensusEngine {
                 rebutted: rev.responses.filter((x) => x.action === "rebut").map((x) => x.claim),
               })),
             ),
-          }) + (q && run.quarantine ? injectionsForJudge(run.quarantine.findings) : ""),
+          }) + (q && run.quarantine ? injectionsForJudge(run.quarantine.findings, q) : ""),
         },
       ],
       "synthesize",
     );
-    let synthesis: string;
+    let synthesis = "";
     let writer = synthesizer;
-    try {
-      synthesis = await synthesize(synthesizer, synthesisSystem);
-    } catch (err) {
-      // The reporter failed outright (every stand-in too): a seat that argued the case writes the report rather than losing the debate.
-      const seat = synthesizer === external || err instanceof CompromisedError ? this.active(states).find((x) => x !== external) : undefined;
-      if (!seat || this.opts.signal?.aborted) throw err;
-      if (err instanceof CompromisedError && synthesizer !== external) {
-        // An on-panel judge leaked the canary: its answer and critiques leave the record the stand-in synthesizes from.
-        run.finalAnswers = this.answers(states);
-        if (lastCritiques) lastCritiques = Object.fromEntries(Object.entries(lastCritiques).filter(([l]) => l !== synthesizer.label));
-        mergeFindings();
+    let writerSystem = synthesisSystem;
+    // Quarantine: a writer that leaks the canary while writing, repairing or checking the report loses the report too, and the next seat writes it.
+    for (;;) {
+      try {
+        synthesis = await synthesize(writer, writerSystem);
+        // Guard: the Answer section must read on its own. One rewrite if it leaks debate references.
+        const leak = debateLeak(synthesis);
+        if (leak && !this.opts.signal?.aborted) {
+          try {
+            const fixSystem = captain && writer.panelist.id === captain.id ? CAPTAIN_PROMPT : SYSTEM_PROMPT;
+            const fixed = await this.callWith(writer, fixSystem, [{ role: "user", content: `Report to fix:\n\n${synthesis}` }, { role: "assistant", content: "Understood." }, { role: "user", content: standaloneRepairPrompt(leak) }], "synthesize");
+            if (/^#\s+Answer\s*$/m.test(fixed) && !debateLeak(fixed)) synthesis = fixed;
+          } catch (err) {
+            if (err instanceof CompromisedError) throw err;
+            /* keep the original report */
+          }
+        }
+        run.synthesis = synthesis.trim();
+        this.emit({ type: "synthesis", panelist: writer.panelist.id, text: run.synthesis });
+
+        // Opt-in grounding pass: which of the report's claims the given material actually establishes.
+        run.verification = undefined;
+        if (this.opts.verify && !this.opts.signal?.aborted) {
+          this.emit({ type: "phase", phase: "verify" });
+          try {
+            const checked = await this.callJson(writer, [{ role: "user", content: verifyPrompt({ prompt, context, synthesis: run.synthesis }) }], VerificationSchema, "verify");
+            run.verification = { by: writer.panelist.id, claims: checked.claims, note: checked.note };
+            this.emit({ type: "verification", panelist: writer.panelist.id, verification: run.verification });
+          } catch (err) {
+            if (err instanceof CompromisedError) throw err;
+            // A failed check must not cost the panel its answer; the report says the pass did not complete.
+            run.verification = { by: writer.panelist.id, claims: [], note: `verification did not complete: ${(err as Error).message.split("\n")[0]}` };
+          }
+        }
+        break;
+      } catch (err) {
+        // The reporter failed outright (every stand-in too): a seat that argued the case writes the report rather than losing the debate.
+        const seat = writer === external || err instanceof CompromisedError ? this.active(states).find((x) => x !== external) : undefined;
+        if (!seat || this.opts.signal?.aborted) throw err;
+        if (err instanceof CompromisedError) {
+          // A compromised writer: its answer, critiques and revisions leave the record the stand-in synthesizes from.
+          const live = new Set(this.active(states).map((x) => x.label));
+          run.finalAnswers = this.answers(states);
+          if (lastCritiques) lastCritiques = Object.fromEntries(Object.entries(lastCritiques).filter(([l]) => live.has(l)).map(([l, c]) => [l, { ...c, reviews: c.reviews.filter((r) => live.has(r.answer)) }]));
+          mergeFindings();
+        }
+        this.emit({ type: "panelist:error", label: writer.label, panelist: writer.panelist.id, phase: "synthesize", error: `${(err as Error).message.split("\n")[0]} (seat ${seat.label} writes the report instead)`, dropped: false });
+        writer = seat;
+        writerSystem = SYSTEM_PROMPT;
       }
-      this.emit({ type: "panelist:error", label: synthesizer.label, panelist: synthesizer.panelist.id, phase: "synthesize", error: `${(err as Error).message.split("\n")[0]} (seat ${seat.label} writes the report instead)`, dropped: false });
-      writer = seat;
-      synthesis = await synthesize(seat, SYSTEM_PROMPT);
     }
     run.judge = writer.panelist.id;
-    // Guard: the Answer section must read on its own. One rewrite if it leaks debate references.
-    const leak = debateLeak(synthesis);
-    if (leak && !this.opts.signal?.aborted) {
-      try {
-        const writerSystem = captain && writer.panelist.id === captain.id ? CAPTAIN_PROMPT : SYSTEM_PROMPT;
-        const fixed = await this.callWith(writer, writerSystem, [{ role: "user", content: `Report to fix:\n\n${synthesis}` }, { role: "assistant", content: "Understood." }, { role: "user", content: standaloneRepairPrompt(leak) }], "synthesize");
-        if (/^#\s+Answer\s*$/m.test(fixed) && !debateLeak(fixed)) synthesis = fixed;
-      } catch {
-        /* keep the original report */
-      }
-    }
-    run.synthesis = synthesis.trim();
-    this.emit({ type: "synthesis", panelist: writer.panelist.id, text: run.synthesis });
-
-    // Opt-in grounding pass: which of the report's claims the given material actually establishes.
-    if (this.opts.verify && !this.opts.signal?.aborted) {
-      this.emit({ type: "phase", phase: "verify" });
-      try {
-        const checked = await this.callJson(writer, [{ role: "user", content: verifyPrompt({ prompt, context, synthesis: run.synthesis }) }], VerificationSchema, "verify");
-        run.verification = { by: writer.panelist.id, claims: checked.claims, note: checked.note };
-        this.emit({ type: "verification", panelist: writer.panelist.id, verification: run.verification });
-      } catch (err) {
-        // A failed check must not cost the panel its answer; the report says the pass did not complete.
-        run.verification = { by: writer.panelist.id, claims: [], note: `verification did not complete: ${(err as Error).message.split("\n")[0]}` };
-      }
-    }
 
     for (const s of states) if (s.usage.reported) run.usage[s.panelist.id] = { ...s.usage, reported: undefined, billing: s.panelist.billing };
     if (this.captainState?.usage.reported && !run.usage[this.captainState.panelist.id]) run.usage[this.captainState.panelist.id] = { ...this.captainState.usage, reported: undefined, billing: this.captainState.panelist.billing };
