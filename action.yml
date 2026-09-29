@@ -5,6 +5,10 @@ branding:
   color: purple
 
 inputs:
+  mode:
+    description: 'run (default): the full debate. check: every seat answers once, no debate; sets agreement and needs-human, a cheap gate before a full run.'
+    required: false
+    default: run
   prompt:
     description: The question, fully self-contained. Panelists cannot see the repo.
     required: true
@@ -76,6 +80,12 @@ outputs:
   report:
     description: Path to the full markdown report.
     value: ${{ steps.run.outputs.report }}
+  agreement:
+    description: 'mode: check only. unanimous, majority, split, or insufficient (fewer than two seats answered).'
+    value: ${{ steps.run.outputs.agreement }}
+  needs-human:
+    description: 'mode: check only. "true" unless every seat that answered agreed.'
+    value: ${{ steps.run.outputs.needs-human }}
 
 runs:
   using: composite
@@ -101,6 +111,7 @@ runs:
         IN_ESCALATE_WHEN: ${{ inputs.escalate-when }}
         IN_MAX_COST: ${{ inputs.max-cost }}
         IN_TIMEOUT: ${{ inputs.timeout-minutes }}
+        IN_MODE: ${{ inputs.mode }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
@@ -130,6 +141,44 @@ runs:
         add_if_set --escalate "$IN_ESCALATE"
         add_if_set --escalate-when "$IN_ESCALATE_WHEN"
         if [ "$IN_VERIFY" = "true" ]; then args+=(--verify); fi
+
+        case "$IN_MODE" in run | check | "") ;; *) echo "::error::mode must be run or check, not \"$IN_MODE\""; exit 1 ;; esac
+        if [ "$IN_MODE" = "check" ]; then
+          # Cheap gate: every seat answers once, no debate. rounds, verify and escalate do not apply.
+          out="${RUNNER_TEMP:-/tmp}/consensus-check.json"
+          rm -f "$out"
+          cargs=(check "$IN_PROMPT" --json -o "$out" --quiet --max-cost "$IN_MAX_COST" --timeout "$IN_TIMEOUT")
+          if [ -n "${ctxfile:-}" ]; then cargs+=(--context "$ctxfile"); fi
+          add_c() { if [ -n "$2" ]; then cargs+=("$1" "$2"); fi; }
+          add_c --profile "$IN_PROFILE"
+          add_c --panel "$IN_PANEL"
+          add_c --variants "$IN_VARIANTS"
+          add_c --for "$IN_FOR"
+          add_c --effort "$IN_EFFORT"
+          # 0 unanimous, 1 the models disagree, 2 no signal: all three are results, read from the outputs.
+          # Without a result file the check itself failed (bad input, unreachable panel): fail the step.
+          set +e
+          node "$ACTION_PATH/dist/cli.js" "${cargs[@]}"
+          code=$?
+          set -e
+          if [ ! -s "$out" ]; then exit "$code"; fi
+          report="${RUNNER_TEMP:-/tmp}/consensus-report.md"
+          node --input-type=module -e '
+            import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+            const { renderCheck } = await import(process.env.ACTION_PATH + "/dist/index.js");
+            const r = JSON.parse(readFileSync(process.argv[1], "utf8"));
+            const md = renderCheck(r);
+            writeFileSync(process.argv[2], md + "\n");
+            const out = process.env.GITHUB_OUTPUT;
+            const top = r.agreement === "unanimous" || r.agreement === "majority" ? r.positions[0].answer.replace(/\s+/g, " ") : "";
+            appendFileSync(out, `answer<<CONSENSUS_EOF\n${top}\nCONSENSUS_EOF\n`);
+            appendFileSync(out, `agreement=${r.agreement}\n`);
+            appendFileSync(out, `needs-human=${r.needsHuman}\n`);
+            appendFileSync(out, `report=${process.argv[2]}\n`);
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY ?? "/dev/null", md + "\n");
+          ' "$out" "$report"
+          exit 0
+        fi
 
         # Exit 2 means the panel shrank but still answered; keep going and say so in the report.
         set +e

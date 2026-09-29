@@ -75,6 +75,45 @@ jobs:
 
 Built-in presets such as `groq-fast` and `frontier` resolve by name from the API keys in the job's environment; a custom profile must be committed in the repo's `consensus.config.json`.
 
+## A cheap gate: check first, debate only on a split
+
+`mode: check` asks every seat once, with no critique or revision, and reports whether the answers agree. Disagreement between independent models is a cheap uncertainty signal: when they all say the same thing there is little a debate would add; when they split, that is the case worth a full run and a human's attention.
+
+```yaml
+      - uses: seanheiney/consensus@main
+        id: gate
+        with:
+          mode: check
+          prompt: "Does this diff change the public API? Answer yes or no."
+          context-file: /tmp/diff.patch
+          panel: groq:openai/gpt-oss-120b
+          variants: 3
+          max-cost: "0.10"
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+
+      - name: Full debate only when the quick check split
+        if: steps.gate.outputs.needs-human == 'true'
+        uses: seanheiney/consensus@main
+        with:
+          prompt: "Does this diff change the public API, and is the change safe for existing callers?"
+          context-file: /tmp/diff.patch
+          profile: frontier
+          comment: "true"
+          max-cost: "3"
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+A check costs one call per seat plus, only when the answers differ in wording, one call to the captain to group them into positions. Ask questions with a short answer (yes or no, a choice, a number): that is what makes the answers comparable. `rounds`, `verify` and `escalate` do not apply in check mode.
+
+The step itself does not fail on disagreement; branch on the outputs. `agreement` is `unanimous`, `majority`, `split`, or `insufficient` (fewer than two seats answered, so there is no signal); `needs-human` is `true` for everything but `unanimous`. A seat that fails is reported as dropped in the report and never counted towards a position. Outside the action, `consensus check` exits `0` when unanimous, `1` when not, and `2` when it could not produce a signal, so a plain shell step can gate on it too:
+
+```bash
+consensus check "Is this migration reversible? Answer yes or no." -c migrations/0042.sql -P groq-fast || echo "models disagree (exit 1) or no signal (exit 2): escalate"
+```
+
 ## Answer a question from a PR comment
 
 ```yaml
@@ -106,6 +145,7 @@ A comment body is untrusted input written by whoever opened it. The panel has no
 
 | Input | Meaning |
 |---|---|
+| `mode` | `run` (default, the full debate) or `check` (every seat answers once; sets `agreement` and `needs-human`). |
 | `prompt` (required) | The question, self-contained. |
 | `context` / `context-file` | Material to paste in: a diff, a file, constraints. |
 | `profile` / `panel` | Which models sit on the panel. |
@@ -125,6 +165,8 @@ A comment body is untrusted input written by whoever opened it. The panel has no
 | `converged` | `true` when every seat accepted every other seat's answer. Agreement, not proof. |
 | `run-id` | Id of the run. |
 | `report` | Path to the full markdown report (also written to the job summary). |
+| `agreement` | Check mode: `unanimous`, `majority`, `split` or `insufficient`. |
+| `needs-human` | Check mode: `true` unless every seat that answered agreed. |
 
 ## Gating on the result
 

@@ -303,6 +303,78 @@ program
     }
   });
 
+// ---- check ---------------------------------------------------------------
+program
+  .command("check")
+  .description("cheap disagreement signal: every seat answers once, no debate; exit 0 unanimous, 1 not unanimous (a human should look), 2 no signal")
+  .argument("[prompt]", "the question ('-' or omitted reads stdin)")
+  .option("-f, --file <path>", "read the question from a file")
+  .option("-c, --context <path>", "extra context file appended to the question")
+  .option("-P, --profile <name>", "model profile to use (see `consensus profiles`)")
+  .option("-p, --panel <specs>", "comma-separated panelists, e.g. claude,codex:gpt-5.6-sol,xai:grok-4.6#max")
+  .option("--variants <n>", "seat the panel's model(s) n times, each under a different reasoning angle", parseIntArg)
+  .option("--for <task>", `seat the angles that suit a kind of work (${taskNames()})`)
+  .option("--captain <spec|auto|neutral|none>", "who groups the answers into positions (default auto; none = an external --judge if given, else plain comparison)")
+  .option("-j, --judge <spec>", "compare with this model when there is no captain")
+  .option("--compare <how>", "auto (default: plain comparison, the captain only when that finds more than one position) or plain (never call a model to compare)", (v: string) => { if (!["auto", "plain"].includes(v)) throw new InvalidArgumentError("expected auto or plain"); return v; })
+  .option("-e, --effort <level>", "low|medium|high|xhigh|max (default for models without their own #effort)", parseEffort)
+  .option("--max-tokens <n>", "max output tokens per call", parseIntArg)
+  .option("--max-cost <usd>", "skip the comparer call once spend billed to API keys exceeds this", (v: string) => { const n = Number(v); if (!(n > 0)) throw new InvalidArgumentError("must be a positive number"); return n; })
+  .option("--no-retry", "do not retry a seat once on a transient failure")
+  .option("--timeout <minutes>", "kill any single model call after this many minutes (default 20)", (v: string) => { const n = Number(v); if (!(n > 0)) throw new InvalidArgumentError("must be a positive number"); return n; })
+  .option("--force", "check even if pre-flight finds a seat that cannot be reached")
+  .option("--json", "print the result as JSON")
+  .option("-o, --output <path>", "write the result to a file as well as stdout")
+  .option("-q, --quiet", "no progress output on stderr")
+  // A bad flag must exit 2 (no signal), not 1, which means "the models disagree".
+  .exitOverride((err) => process.exit(err.exitCode === 0 ? 0 : 2))
+  .action(async (promptArg: string | undefined, o) => {
+    const { checkExitCode, renderCheck, runCheck } = await import("./check.js");
+    try {
+      const cfg = await loadConfig();
+      const prompt = (await readPrompt(promptArg, o.file)).trim();
+      if (!prompt) throw new Error("Prompt is empty");
+      const context = o.context ? await readFile(o.context, "utf8") : undefined;
+      const r = await resolveRun({ cfg, panel: o.panel ? String(o.panel).split(",") : undefined, profile: o.profile, judge: o.judge, captain: o.captain ?? (o.compare === "plain" ? "none" : undefined), effort: o.effort, variants: o.variants, task: o.for, env: credentialEnv() });
+      const problems = preflight(r.panel, await _scan(credentialEnv()), credentialEnv());
+      if (problems.length) {
+        const msg = `pre-flight found seats that cannot run:\n  - ${problems.join("\n  - ")}`;
+        if (!o.force) throw new Error(`${msg}\nFix the connection, change the panel, or pass --force to check without those seats.`);
+        if (!o.quiet) log(yellow(msg + "\n(continuing with --force; those seats will be reported as dropped)"));
+      }
+      // The captain groups the answers; with --captain none an external judge can, but a seat grading its own answer should not.
+      const comparer = r.captain ?? (r.panel.some((x) => x.id === r.judge.id) ? undefined : r.judge);
+      if (!o.quiet) log(dim(`check: ${r.panel.map((x) => x.id).join(", ")} answer once each; ${comparer && o.compare !== "plain" ? `${comparer.id} groups the answers if they differ` : "plain comparison"}`));
+      if (o.timeout) setDefaultTimeout(o.timeout * 60_000);
+      const ac = new AbortController();
+      process.once("SIGINT", () => ac.abort());
+      const result = await runCheck(prompt, context, {
+        panel: r.panel,
+        comparer,
+        compare: o.compare,
+        effort: r.effort,
+        maxTokens: o.maxTokens ?? cfg.maxTokens,
+        maxCostUsd: o.maxCost ?? cfg.maxCostUsd,
+        retry: o.retry !== false,
+        signal: ac.signal,
+        onEvent: (e) => {
+          if (o.quiet) return;
+          if (e.type === "seat:done") log(`  ${G.ok} ${e.seat}  ${dim(`${(e.ms / 1000).toFixed(1)}s`)}`);
+          else if (e.type === "seat:error") log(red(`  ${G.err} ${e.seat}: ${e.error} (dropped)`));
+          else log(dim(`  answers differ; ${e.by} is grouping them`));
+        },
+      });
+      const out = o.json ? JSON.stringify(result, null, 2) : renderCheck(result);
+      process.stdout.write(out + "\n");
+      if (o.output) await writeFile(o.output, out + "\n");
+      process.exitCode = checkExitCode(result);
+    } catch (err) {
+      // 1 means "the models disagree", so a check that could not run must not look like one.
+      log(red(`error: ${err instanceof Error ? err.message : String(err)}`));
+      process.exitCode = 2;
+    }
+  });
+
 // ---- adr -----------------------------------------------------------------
 program
   .command("adr")
