@@ -32,7 +32,7 @@ import { scanVendors as _scan } from "./doctor.js";
 import { ConsensusEngine } from "./protocol/engine.js";
 import { renderReport } from "./report.js";
 import { connectVendor, runSetup, statusLine } from "./setup.js";
-import { findReusableRun, listRuns, loadRun, saveRun } from "./store.js";
+import { findReusableRun, listRuns, loadRun, repoRelativePath, saveRun } from "./store.js";
 import { eventToTerminal, openDebateLog } from "./debatelog.js";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -252,7 +252,11 @@ program
       const done = await engine.run(p, c);
       // Recorded so `consensus adr --recheck` can seat the same profile and re-read the context later.
       if (resolved.profile) done.profile = resolved.profile;
-      if (o.context) done.contextFile = String(o.context);
+      if (o.context) {
+        // Relative to the repo, never a local absolute path: the ADR that records it is committed.
+        const rel = repoRelativePath(String(o.context));
+        if (rel) done.contextFile = rel;
+      }
       return done;
     };
     let run: import("./types.js").ConsensusRun;

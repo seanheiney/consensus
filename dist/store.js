@@ -2,8 +2,8 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { ensureGitignore } from "./hosts.js";
-import { resolve, dirname as pdirname } from "node:path";
-function findGitRoot(from = process.cwd()) {
+import { isAbsolute, relative, resolve, dirname as pdirname, sep } from "node:path";
+export function findGitRoot(from = process.cwd()) {
     let d = resolve(from);
     for (;;) {
         if (existsSync(join(d, ".git")))
@@ -13,6 +13,22 @@ function findGitRoot(from = process.cwd()) {
             return undefined;
         d = up;
     }
+}
+/**
+ * A path as it should be recorded in a committed file: relative to the repo root (or the
+ * working directory outside a repo), with forward slashes. Undefined for a file outside it,
+ * so a local absolute path never lands in the repo.
+ */
+export function repoRelativePath(path, cwd = process.cwd()) {
+    const root = findGitRoot(cwd) ?? resolve(cwd);
+    const rel = relative(root, resolve(cwd, path));
+    if (!rel || rel.startsWith("..") || isAbsolute(rel))
+        return undefined;
+    return rel.split(sep).join("/");
+}
+/** Resolve a path recorded by repoRelativePath (older records may hold it as typed). */
+export function fromRepoPath(path, cwd = process.cwd()) {
+    return isAbsolute(path) ? path : join(findGitRoot(cwd) ?? resolve(cwd), path);
 }
 import { renderReport } from "./report.js";
 /** Persist a run as JSON + markdown under `<dir>/<run id>/`. Returns the run directory. */

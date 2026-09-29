@@ -14,7 +14,7 @@ import { statedConfidence } from "./escalate.js";
 import { extractJson } from "./protocol/json.js";
 import { ConsensusEngine, toStrictJsonSchema } from "./protocol/engine.js";
 import { dim, log, progressLogger, red, yellow } from "./progress.js";
-import { loadRun, saveRun } from "./store.js";
+import { fromRepoPath, loadRun, saveRun } from "./store.js";
 export const ADR_MARKER = "consensus-adr";
 const RECHECK_MARKER = "consensus-recheck";
 /** A seat as a member spec that resolveRun can seat again. */
@@ -177,7 +177,7 @@ export async function recoverInput(adr, deps) {
         return { prompt: adr.question };
     const file = adr.meta?.contextFile;
     if (file) {
-        const text = await (deps.readFile ?? ((p) => readFile(p, "utf8")))(file).catch(() => undefined);
+        const text = await (deps.readFile ?? ((p) => readFile(fromRepoPath(p), "utf8")))(file).catch(() => undefined);
         if (text !== undefined)
             return { prompt: adr.question, context: text, note: `The saved run \`${adr.runId}\` is not on this machine, so the context was re-read from \`${file}\`, which may have changed since the decision.` };
     }

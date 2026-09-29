@@ -16,7 +16,7 @@ The record holds the question, the decision, the confidence, what stayed unresol
 <!-- consensus-adr {"v":1,"run":"20260924T120000Z-abc123","profile":"balanced","panel":["claude:claude-opus-5#high","codex:gpt-5.6-sol#high+skeptic"],"rounds":3,"effort":"high","context":"given","contextFile":"docs/inventory.md"} -->
 ```
 
-It names the context file, never the context itself. Pasted context stays in the saved run under `.consensus/runs`, which is kept out of git.
+It names the context file, never the context itself. The path is stored relative to the repo root, so it resolves in CI and never leaks a local home directory; a context file outside the repo is not named at all. Pasted context stays in the saved run under `.consensus/runs`, which is kept out of git.
 
 ## Rechecking
 

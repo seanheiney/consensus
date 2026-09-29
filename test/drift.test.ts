@@ -328,3 +328,21 @@ describe("recheck hardening", () => {
     expect(await recheckCommand({ paths: [], all: true, dir: join(tmpdir(), "consensus-no-such-dir-xyz") })).toBe(3);
   });
 });
+
+describe("recorded context paths", () => {
+  it("are stored relative to the repo root, and a file outside it is not stored", async () => {
+    const { mkdtemp, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { repoRelativePath, fromRepoPath } = await import("../src/store.js");
+    const root = await mkdtemp(join(tmpdir(), "consensus-repo-"));
+    await mkdir(join(root, ".git"));
+    await mkdir(join(root, "sub", "deeper"), { recursive: true });
+    const cwd = join(root, "sub");
+    expect(repoRelativePath("deeper/ctx.md", cwd)).toBe("sub/deeper/ctx.md");
+    expect(repoRelativePath(join(root, "sub", "deeper", "ctx.md"), cwd)).toBe("sub/deeper/ctx.md");
+    expect(repoRelativePath(join(tmpdir(), "elsewhere.md"), cwd)).toBeUndefined();
+    expect(fromRepoPath("sub/deeper/ctx.md", join(root, "sub", "deeper"))).toBe(join(root, "sub", "deeper", "ctx.md"));
+    expect(fromRepoPath("/abs/legacy.md", cwd)).toBe("/abs/legacy.md");
+  });
+});
