@@ -167,6 +167,55 @@ export function createMcpServer(): McpServer {
     },
   );
 
+  // A separate tool rather than a mode of `consensus`: that tool's description promises a slow, costly debate and
+  // most of its arguments (rounds, transcript, verify, escalation) mean nothing here. Hosts pick tools by description.
+  server.registerTool(
+    "consensus_check",
+    {
+      title: "Quick disagreement check",
+      description:
+        "Fast 'should a human look at this?' signal. Every panel model answers the question once, independently, with a short answer and a one-line rationale; " +
+        "one cheap step groups the answers into positions. No debate. Returns the agreement level (unanimous / majority / split), who holds each position, and 'needs human: yes|no'. " +
+        "Use it before acting on a judgment call, or to decide whether a full `consensus` debate is worth its cost: disagreement between independent models is a cheap uncertainty signal. " +
+        "Agreement is not proof of correctness. Costs one call per seat plus at most one comparison call. Put everything the models need in `prompt` and `context`.",
+      inputSchema: {
+        prompt: z.string().describe("The question, fully self-contained. Works best when it has a short answer: a choice, a verdict, a number."),
+        context: z.string().optional().describe("Supporting material: code, diff, constraints. Paste, don't describe."),
+        profile: z.string().optional().describe("Named model profile (see consensus_profiles). Omit for the user's default."),
+        panel: z.array(z.string()).optional().describe("Override the panel with seats like 'claude', 'codex:gpt-5.6-sol', 'claude+skeptic'."),
+        variants: z.number().int().min(2).max(8).optional().describe("Seat the panel's model(s) this many times under different reasoning angles."),
+        task: z.enum(["code-review", "architecture", "debug", "security", "product", "estimate"]).optional().describe("Seat the angles that suit this kind of work."),
+        effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional().describe("Reasoning effort for seats without their own."),
+        captain: z.string().optional().describe("Who groups differing answers: a spec, 'auto' (default), 'neutral' or 'none' (plain comparison, unless an external judge is configured)."),
+        max_cost: z.number().positive().optional().describe("Skip the comparison call once spend billed to API keys exceeds this many USD."),
+      },
+      annotations: { title: "Quick disagreement check", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    },
+    async ({ prompt, context, profile, panel, variants, task, effort, captain, max_cost }, extra) => {
+      const { renderCheck, runCheck } = await import("./check.js");
+      const cfg = await loadConfig();
+      const r = await resolveRun({ cfg, panel, profile, effort, captain, variants, task, env: credentialEnv() });
+      const comparer = r.captain ?? (r.panel.some((x) => x.id === r.judge.id) ? undefined : r.judge);
+      const token = extra._meta?.progressToken;
+      const total = r.panel.length + 1;
+      let step = 0;
+      const result = await runCheck(prompt, context, {
+        panel: r.panel,
+        comparer,
+        effort: r.effort,
+        maxTokens: cfg.maxTokens,
+        maxCostUsd: max_cost ?? cfg.maxCostUsd,
+        signal: extra.signal,
+        onEvent: (e) => {
+          if (token === undefined) return;
+          const message = e.type === "seat:done" ? `${e.seat} answered` : e.type === "seat:error" ? `${e.seat} failed: ${e.error}` : `${e.by} is grouping the answers`;
+          void extra.sendNotification({ method: "notifications/progress", params: { progressToken: token, progress: Math.min(++step, total - 1), total, message } }).catch(() => undefined);
+        },
+      });
+      return { content: [{ type: "text" as const, text: renderCheck(result) }] };
+    },
+  );
+
   server.registerTool(
     "consensus_design",
     {

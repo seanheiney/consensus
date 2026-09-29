@@ -131,6 +131,17 @@ consensus "Does this schema support our reporting queries?" -c schema.sql --veri
 
 `groq-fast` and `groq-council` (see `consensus profile presets`) seat Groq's open-weight models under different angles. They appear once `GROQ_API_KEY` is set, answer in seconds for fractions of a cent, and are the natural first tier to escalate from. As with every profile the captain is `auto` — the best available model moderates and writes the report, even when the seats are cheap. For an all-cheap run (a benchmark arm, or a hard spend ceiling), pin it: `--captain groq:openai/gpt-oss-120b#high`, or `--captain none`.
 
+### A quick disagreement check
+
+```bash
+consensus check "Is this endpoint idempotent? Answer yes or no." -c handler.ts
+consensus check "Which queue: SQS or Kafka?" --variants 3 --json
+```
+
+Every seat answers once, in parallel, with a short answer and a one-line rationale; there is no critique, revision or synthesis. If the answers normalize to the same text, that is the result. If they differ, the captain (or an external `--judge`) makes one cheap call to group them into positions, so "Postgres" and "PostgreSQL 17" count as one; with no captain, or with `--compare plain`, the grouping is normalized string comparison, which suits yes/no, a choice or a number. The output is the agreement level (unanimous, majority, split), the positions with the seats holding each, any dropped seats (reported, never counted), and `Needs human: yes|no`.
+
+Exit codes: `0` unanimous, `1` majority or split (a human should look), `2` no signal (fewer than two seats answered, or the check could not run). Agreement between models is not proof: a unanimous wrong answer is possible, and `check` is a triage signal, not a substitute for the debate. The MCP server exposes it as `consensus_check`.
+
 ### Decisions your repo keeps
 
 ```bash
@@ -418,6 +429,7 @@ Two tools are exposed:
 |---|---|---|
 | `consensus` | `prompt` (required), `context`, `profile`, `panel[]`, `rounds`, `effort`, `transcript` | By default a short structured summary: `# Answer`, `# Confidence`, `# Unresolved disagreements`, the seats, whether it converged, the estimated cost, and the path to the full debate. With `transcript: true`, the whole report. |
 | `consensus_profiles` | none | The user's profiles and which vendors are connected. Cheap; call it before a long run. |
+| `consensus_check` | `prompt` (required), `context`, `profile`, `panel[]`, `variants`, `task`, `effort`, `captain`, `max_cost` | Every seat answers once, no debate: the agreement level, the positions with the seats holding each, dropped seats, and `Needs human: yes|no`. A separate tool rather than a mode of `consensus` so hosts choosing by description see a fast, cheap call, not a debate. |
 
 Runs started over MCP still write `debate.md` under `.consensus/runs/<id>/`, and send MCP progress notifications (phase, seat done, converged) when the client passes a `progressToken`. Expect 1–4 minutes for a small panel and 10+ minutes for a frontier profile at 3 rounds, and set client timeouts accordingly.
 
@@ -504,6 +516,8 @@ Saved keys are handed only to the matching API client and are **never** exported
 | `0` | Success. |
 | `1` | Error: bad flags, unreachable seats at pre-flight, spend ceiling hit, no prompt, unknown profile or persona. |
 | `2` | The run finished, but the panel shrank — one or more seats were dropped after failing. The report names them. |
+
+`consensus check` uses its own codes so scripts can branch on them: `0` unanimous, `1` the models disagree (majority or split), `2` no signal (fewer than two seats answered, or an error such as an unknown profile).
 
 ## Design a panel from a brief
 

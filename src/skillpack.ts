@@ -51,6 +51,8 @@ A whole debate can cost fractions of a cent and take seconds: a small open-weigh
 
 Every run has a captain by default: the best available model (preferring one not on the panel) moderates after each critique round, referees disputes it can settle, puts direct questions to seats that are stuck, may grant one extra round, and writes the report; pass \`captain: "none"\` to disable or a spec to choose one.
 
+Quick check first: \`consensus_check\` (same \`prompt\`, \`context\`, \`profile\`, \`panel\`, \`variants\`, \`task\`) has every model answer once, no debate, and returns the agreement level, who holds each position, and \`needs human: yes|no\`. Use it before acting on a judgment call; when it says the models split, surface that to the user or run the full \`consensus\` debate. Unanimity is agreement, not proof.
+
 Two companion tools: \`consensus_design\` turns a plain-English brief ("4 panelists: security, distributed systems, a PM, a skeptic; frontier models") into a saved profile with personas and returns its name; \`consensus_profiles\` lists profiles and which vendors are connected (call it first if unsure). Runs take 1-4 minutes for small panels and 10+ for frontier profiles with 3 rounds; if your MCP client supports it, pass \`_meta.progressToken\` on the call to receive progress notifications (phase, seat done, converged) instead of silence.
 
 Fallback if the MCP tool is not available: run the CLI and read stdout.
@@ -62,6 +64,7 @@ consensus "<problem>" --variants 4             # one model, four angles: cheap d
 consensus "<problem>" --for code-review -c diff.patch
 consensus "<problem>" -P groq-fast --escalate frontier   # promote only if unsettled
 consensus "<problem>" -c schema.sql --verify   # check claims against what you pasted
+consensus check "<question>"                   # every seat answers once; exit 1 when they disagree
 consensus profiles                             # list model profiles
 \`\`\`
 

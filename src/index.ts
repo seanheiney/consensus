@@ -14,6 +14,7 @@ export { createClaudeCliPanelist, createCodexCliPanelist, createGeminiCliPanelis
 export { CATALOG, PRESETS, STARTER_PROFILES } from "./catalog.js";
 export { PERSONAS, withPersona, resolvePersona } from "./personas.js";
 export { runWithEscalation, shouldEscalate, statedConfidence, openDisputes, escalationContext, type EscalateWhen } from "./escalate.js";
+export { runCheck, renderCheck, checkExitCode, normalizeAnswer, groupPlain, agreementOf, type CheckResult, type CheckPosition, type Agreement } from "./check.js";
 export { ANGLES, TASKS, expandVariants, expandTask, taskNames, type TaskPreset } from "./variants.js";
 export { runBench, renderBench, estimateCost, gradeCase, loadSuite, SAMPLE_SUITE, BenchSuiteSchema, type BenchReport, type BenchSuite, type BenchCase } from "./bench.js";
 export { buildPanel, splitMember, memberId, resolvePortableMembers, parseConfigLenient, configWarnings, autoCaptain, autoExternalJudge, type Member } from "./config.js";
