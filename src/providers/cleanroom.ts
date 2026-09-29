@@ -23,6 +23,8 @@ export interface GrokSurface {
   mcpServers: string[];
   /** "<event> (<source>)", e.g. "PreToolUse (user)". */
   hooks: string[];
+  /** Anything else inspect found that a sandbox should not have: user agents, LSP servers, remote settings. */
+  other: string[];
 }
 
 /** How a grok receipt was observed; shown in reports and doctor --isolation. */
@@ -63,17 +65,28 @@ export function parseGrokInspect(stdout: string | unknown): GrokSurface | undefi
   const hooks = arr(o.hooks);
   // All five lists are required: a report missing one cannot vouch for it.
   if (!instructions || !skills || !plugins || !mcpServers || !hooks) return undefined;
-  const name = (x: Record<string, unknown>) => String(x.name ?? x.path ?? "?");
+  // A user's own add-on may be named "x@bundled" or "x@builtin"; tag it so it can never pass for a CLI built-in.
+  const name = (x: Record<string, unknown>, tag: string) => {
+    const n = String(x.name ?? x.path ?? "?");
+    return /@(builtin|bundled)$/.test(n) ? `${n} (${tag})` : n;
+  };
+  // Grok's own agents (source "builtin") always appear; any other agent, LSP server or remote settings did not come from the empty sandbox.
+  const other = [
+    ...(arr(o.agents) ?? []).filter((x) => sourceType(x) !== "builtin").map((x) => `agent ${name(x, sourceType(x) ?? "unknown source")}`),
+    ...(arr(o.lspServers) ?? []).map((x) => `LSP server ${name(x, "lsp")}`),
+    ...((o.externalCompat as { remoteSettingsLoaded?: unknown } | undefined)?.remoteSettingsLoaded === true ? ["remote settings"] : []),
+  ];
   return {
     version: typeof o.grokVersion === "string" ? o.grokVersion : undefined,
     instructions: instructions.map((x) => String(x.path ?? x.name ?? "?")),
     // Bundled skills ship inside grok's own install (like Claude Code's @builtin plugins), so they
     // are listed but do not make a seat unclean. User, plugin and config skills do.
-    skills: skills.map((x) => (sourceType(x) === "bundled" ? `${name(x)}@bundled` : name(x))),
+    skills: skills.map((x) => (sourceType(x) === "bundled" ? `${String(x.name ?? x.path ?? "?")}@bundled` : name(x, sourceType(x) ?? "unknown source"))),
     // A plugin that is installed but disabled still counts: grok found it, and one flag flips it on.
-    plugins: plugins.map(name),
-    mcpServers: mcpServers.map(name),
+    plugins: plugins.map((x) => name(x, "plugin")),
+    mcpServers: mcpServers.map((x) => name(x, "mcp")),
     hooks: hooks.map((x) => `${String(x.event ?? "hook")} (${sourceType(x) ?? "unknown source"})`),
+    other,
   };
 }
 
@@ -89,6 +102,7 @@ export function observedGrokReceipt(base: IsolationReceipt, s: GrokSurface): Iso
     plugins: s.plugins,
     mcpServers: s.mcpServers,
     hooks: s.hooks,
+    other: s.other,
   };
 }
 
@@ -141,8 +155,16 @@ export function isolationChecks(results: { id: string; ok: boolean; error?: stri
   });
 }
 
-export function isolationReport(checks: IsolationCheck[], withheld: string[]): { ok: boolean; seats: IsolationCheck[]; cleanRooms?: CleanRooms; withheld: string[] } {
+export function isolationReport(checks: IsolationCheck[], withheld: string[]): { ok: boolean; seats: IsolationCheck[]; cleanRooms?: CleanRooms; unchecked: string[]; withheld: string[] } {
   const folded: Record<string, SeatIsolation> = {};
   for (const c of checks) if (c.receipt) folded[c.id] = c.receipt;
-  return { ok: checks.every((c) => c.ok && c.clean), seats: checks, cleanRooms: cleanRooms(folded), withheld };
+  let verdict = cleanRooms(folded);
+  // A seat that could not be checked must not vanish from the verdict, or "1/1 seats observed clean" would hide it.
+  const unchecked = checks.filter((c) => !c.receipt).map((c) => c.id).sort();
+  if (unchecked.length) {
+    const rest = verdict ? `; ${verdict.line.replace(/^Clean rooms: /, "").replace(/\.$/, "")}` : "";
+    const line = `Clean rooms: NOT VERIFIED: ${unchecked.join(", ")} could not be checked${rest}.`;
+    verdict = verdict ? { ...verdict, line } : { seats: 0, observedClean: [], configuredOnly: [], api: [], notClean: [], line };
+  }
+  return { ok: checks.every((c) => c.ok && c.clean), seats: checks, cleanRooms: verdict, unchecked, withheld };
 }

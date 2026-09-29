@@ -76,6 +76,8 @@ export interface IsolationReceipt {
   skills?: string[];
   hooks?: string[];
   instructions?: string[];
+  /** Anything else the CLI reported loading; any entry makes a seat not clean (grok: user agents, LSP servers, remote settings). */
+  other?: string[];
   /** How "observed" evidence was gathered when not from the call itself, e.g. "grok inspect --json in an identical sandbox". */
   observedVia?: string;
   /** Where the CLI took its credentials from, when it says ("none" = subscription login). */

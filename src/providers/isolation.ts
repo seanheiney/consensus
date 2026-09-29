@@ -77,9 +77,11 @@ export function receiptFlags(args: string[], valueFlags: string[]): string[] {
 const BENIGN_TOOLS = new Set(["StructuredOutput"]);
 /**
  * Plugins and skills that ship inside the CLI itself (Claude Code reports e.g. "telemetry@builtin", grok
- * "<skill>@bundled"); installed ones make a seat not clean.
+ * "<skill>@bundled"); installed ones make a seat not clean. Each suffix is honoured only in its own list,
+ * so a plugin named "x@bundled" is still an installed plugin.
  */
-const isBuiltin = (name: string) => name.endsWith("@builtin") || name.endsWith("@bundled");
+const isBuiltinPlugin = (name: string) => name.endsWith("@builtin");
+const isBundledSkill = (name: string) => name.endsWith("@bundled");
 
 /** Fold one call's receipt into a seat's running record. */
 export function foldIsolation(prev: SeatIsolation | undefined, r: IsolationReceipt): SeatIsolation {
@@ -90,30 +92,33 @@ export function foldIsolation(prev: SeatIsolation | undefined, r: IsolationRecei
   const skills = union(prev?.skills, r.skills);
   const hooks = union(prev?.hooks, r.hooks);
   const instructions = union(prev?.instructions, r.instructions);
+  const other = union(prev?.other, r.other);
   const clean =
     (prev?.clean ?? true) &&
     !(r.tools ?? []).some((t) => !BENIGN_TOOLS.has(t)) &&
     !(r.mcpServers ?? []).length &&
-    !(r.plugins ?? []).some((p) => !isBuiltin(p)) &&
-    !(r.skills ?? []).some((p) => !isBuiltin(p)) &&
+    !(r.plugins ?? []).some((p) => !isBuiltinPlugin(p)) &&
+    !(r.skills ?? []).some((p) => !isBundledSkill(p)) &&
     !(r.hooks ?? []).length &&
-    !(r.instructions ?? []).length;
+    !(r.instructions ?? []).length &&
+    !(r.other ?? []).length;
   // Evidence is only as strong as the weakest call.
   const rank = { observed: 2, configured: 1, request: 1 } as const;
   const evidence = prev && rank[prev.evidence] < rank[r.evidence] ? prev.evidence : r.evidence;
-  return { ...prev, ...r, evidence, tools, mcpServers, plugins, skills, hooks, instructions, calls: (prev?.calls ?? 0) + 1, clean };
+  return { ...prev, ...r, evidence, tools, mcpServers, plugins, skills, hooks, instructions, other, calls: (prev?.calls ?? 0) + 1, clean };
 }
 
 /** One line per seat for reports and the MCP summary. */
 export function describeIsolation(id: string, s: SeatIsolation): string {
   if (s.route === "api") return `${id}: API request with no tools attached (${s.calls} call${s.calls === 1 ? "" : "s"})`;
-  const builtins = [...(s.plugins ?? []), ...(s.skills ?? [])].filter(isBuiltin).map((p) => p.replace(/@(builtin|bundled)$/, ""));
-  const installed = s.plugins?.filter((p) => !isBuiltin(p));
+  const builtins = [...(s.plugins ?? []).filter(isBuiltinPlugin), ...(s.skills ?? []).filter(isBundledSkill)].map((p) => p.replace(/@(builtin|bundled)$/, ""));
+  const installed = s.plugins?.filter((p) => !isBuiltinPlugin(p));
   // Grok's inspect report covers skills, hooks and instruction files but not tools (those are off by --tools "").
   const extra = [
-    s.skills && `skills ${list(s.skills.filter((p) => !isBuiltin(p)))}`,
+    s.skills && `skills ${list(s.skills.filter((p) => !isBundledSkill(p)))}`,
     s.hooks && `hooks ${list(s.hooks)}`,
     s.instructions && `instruction files ${list(s.instructions)}`,
+    s.other?.length && `other add-ons ${list(s.other)}`,
   ]
     .filter(Boolean)
     .map((x) => `, ${x}`)

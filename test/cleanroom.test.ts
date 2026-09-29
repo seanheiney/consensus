@@ -19,7 +19,7 @@ const BASE: IsolationReceipt = { route: "cli", evidence: "configured", bin: "gro
 describe("parseGrokInspect", () => {
   it("reads a clean sandbox report (captured from grok 1.0.41) as empty lists", async () => {
     const s = parseGrokInspect(await fixture("grok-inspect-clean.json"));
-    expect(s).toEqual({ version: "1.0.41", instructions: [], skills: [], plugins: [], mcpServers: [], hooks: [] });
+    expect(s).toEqual({ version: "1.0.41", instructions: [], skills: [], plugins: [], mcpServers: [], hooks: [], other: [] });
     const seat = foldIsolation(undefined, observedGrokReceipt(BASE, s!));
     expect(seat).toMatchObject({ evidence: "observed", observedVia: GROK_OBSERVED_VIA, version: "1.0.41", clean: true });
   });
@@ -59,6 +59,40 @@ describe("parseGrokInspect", () => {
     }
   });
 
+  it("never lets a user add-on pass for a CLI built-in by its name", async () => {
+    const clean = JSON.parse(await fixture("grok-inspect-clean.json"));
+    const spoofs: Record<string, unknown[]> = {
+      skills: [{ name: "evil@bundled", source: { type: "user", path: "/x" } }],
+      plugins: [{ name: "evil@builtin", enabled: true }],
+      mcpServers: [{ name: "evil@builtin" }],
+    };
+    for (const [k, v] of Object.entries(spoofs)) {
+      const seat = foldIsolation(undefined, observedGrokReceipt(BASE, parseGrokInspect({ ...clean, [k]: v })!));
+      expect(seat.clean, k).toBe(false);
+      expect(describeIsolation("grok", seat), k).not.toContain("CLI built-ins");
+    }
+    // Each suffix counts only in its own list: a Claude plugin from a marketplace named "bundled" is installed, not built in.
+    expect(foldIsolation(undefined, { route: "cli", evidence: "observed", tools: [], mcpServers: [], plugins: ["x@bundled"] }).clean).toBe(false);
+    expect(foldIsolation(undefined, { ...BASE, evidence: "observed", skills: ["x@builtin"] }).clean).toBe(false);
+  });
+
+  it("counts user agents, LSP servers and remote settings, but not grok's own agents", async () => {
+    const clean = JSON.parse(await fixture("grok-inspect-clean.json"));
+    expect(parseGrokInspect(clean)!.other).toEqual([]);
+    const variants: Record<string, unknown> = {
+      agents: [...clean.agents, { name: "reviewer", source: { type: "user", path: "/x" } }],
+      lspServers: [{ name: "tsserver" }],
+      externalCompat: { ...clean.externalCompat, remoteSettingsLoaded: true },
+    };
+    for (const [k, v] of Object.entries(variants)) {
+      const s = parseGrokInspect({ ...clean, [k]: v })!;
+      expect(s.other, k).toHaveLength(1);
+      const seat = foldIsolation(undefined, observedGrokReceipt(BASE, s));
+      expect(seat.clean, k).toBe(false);
+      expect(describeIsolation("grok", seat), k).toContain("other add-ons");
+    }
+  });
+
   it("refuses output that is not an inspect report, so the seat stays configured", () => {
     expect(parseGrokInspect("")).toBeUndefined();
     expect(parseGrokInspect("error: unrecognized subcommand 'inspect'")).toBeUndefined();
@@ -69,7 +103,7 @@ describe("parseGrokInspect", () => {
 
 describe("evidence folding", () => {
   it("a configured call after an observed one weakens the seat, and dirt from any call sticks", () => {
-    const observed = observedGrokReceipt(BASE, { instructions: [], skills: [], plugins: [], mcpServers: [], hooks: [] });
+    const observed = observedGrokReceipt(BASE, { instructions: [], skills: [], plugins: [], mcpServers: [], hooks: [], other: [] });
     const a = foldIsolation(undefined, observed);
     expect(foldIsolation(a, BASE)).toMatchObject({ evidence: "configured", clean: true, calls: 2 });
     const dirty = foldIsolation(a, { ...observed, hooks: ["Stop (user)"] });
@@ -121,7 +155,7 @@ describe("run.json and the report", () => {
     const observed: IsolationReceipt = { route: "cli", evidence: "observed", tools: [], mcpServers: [], plugins: [] };
     const panel = [
       withReceipt(fakePanelist("claude:m", script("A")), "claude", observed),
-      withReceipt(fakePanelist("grok:m", script("B")), "grok", observedGrokReceipt(BASE, { instructions: [], skills: [], plugins: [], mcpServers: [], hooks: [] })),
+      withReceipt(fakePanelist("grok:m", script("B")), "grok", observedGrokReceipt(BASE, { instructions: [], skills: [], plugins: [], mcpServers: [], hooks: [], other: [] })),
       withReceipt(fakePanelist("codex:m", script("C")), "codex", { route: "cli", evidence: "configured" }),
     ];
     const run = await new ConsensusEngine({ panel, rounds: 1 }).run("q");
@@ -206,8 +240,10 @@ echo '{"result":"pong"}'
         { id: "grok", ok: true, clean: true, receipt: { route: "cli", evidence: "observed", calls: 1, clean: true } },
         { id: "codex", ok: false, clean: false, error: "codex: not logged in" },
       ],
-      cleanRooms: { seats: 1, observedClean: ["grok"], line: "Clean rooms: 1/1 seats observed clean." },
+      cleanRooms: { seats: 1, observedClean: ["grok"], line: "Clean rooms: NOT VERIFIED: codex could not be checked; 1/1 seats observed clean." },
+      unchecked: ["codex"],
     });
-    expect(isolationReport(isolationChecks([probed]), []).ok).toBe(true);
+    expect(isolationReport(isolationChecks([probed]), [])).toMatchObject({ ok: true, unchecked: [], cleanRooms: { line: "Clean rooms: 1/1 seats observed clean." } });
+    expect(isolationReport(isolationChecks([{ id: "codex", ok: false, error: "x" }]), []).cleanRooms?.line).toBe("Clean rooms: NOT VERIFIED: codex could not be checked.");
   });
 });

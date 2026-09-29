@@ -38,9 +38,9 @@ A seat's evidence is the weakest across all its calls.
 
 ### What counts against a seat
 
-Any tool other than structured output, any MCP server, any installed plugin (enabled or not), any skill that is not a CLI built-in, any hook, any instruction file. A plugin that is installed but disabled still counts: grok found it, and one setting turns it on.
+Any tool other than structured output, any MCP server, any installed plugin (enabled or not), any skill that is not a CLI built-in, any hook, any instruction file. On grok, also any agent that is not one of grok's own (source `builtin`), any LSP server, and remote settings having been loaded; these are listed as "other add-ons". A plugin that is installed but disabled still counts: grok found it, and one setting turns it on.
 
-Built-ins are listed in the receipt but do not count: Claude Code's `@builtin` plugins, and grok skills whose source is `bundled` (shipped inside grok's install at `~/.grok/bundled`, the equivalent of Claude Code's built-ins). An empty sandbox reports none on grok 1.0.41; if a future grok starts shipping bundled skills into every home, they appear as `name@bundled` and the seat stays clean. User, plugin and config-file skills make it not clean.
+Built-ins are listed in the receipt but do not count: Claude Code's `@builtin` plugins, and grok skills whose source is `bundled` (shipped inside grok's install at `~/.grok/bundled`, the equivalent of Claude Code's built-ins). An empty sandbox reports none on grok 1.0.41; if a future grok starts shipping bundled skills into every home, they appear as `name@bundled` and the seat stays clean. User, plugin and config-file skills make it not clean. Built-in status comes from the source grok reports, never from the name: a user skill or plugin named `x@bundled` or `x@builtin` is recorded as `x@bundled (user)` and counts against the seat. Each suffix is honoured only in its own list (`@builtin` for Claude Code plugins, `@bundled` for grok skills).
 
 Grok's inspect report does not list tools. Grok seats run with `--tools ""`, and the receipt says "tools off by flag" rather than claiming an observation it did not make.
 
@@ -73,17 +73,18 @@ Both make one small real call per connected subscription seat (it spends a littl
 
 ```json
 {
-  "ok": true,
+  "ok": false,
   "seats": [
     { "id": "grok", "ok": true, "clean": true, "receipt": { "route": "cli", "evidence": "observed", "observedVia": "grok inspect --json in an identical sandbox", "skills": [], "mcpServers": [], "hooks": [], "instructions": [], "plugins": [], "flags": ["..."], "envPassed": ["..."], "envDropped": 41, "calls": 1, "clean": true } },
     { "id": "codex", "ok": false, "clean": false, "error": "codex produced no answer ..." }
   ],
-  "cleanRooms": { "seats": 1, "observedClean": ["grok"], "configuredOnly": [], "api": [], "notClean": [], "line": "Clean rooms: 1/1 seats observed clean." },
+  "cleanRooms": { "seats": 1, "observedClean": ["grok"], "configuredOnly": [], "api": [], "notClean": [], "line": "Clean rooms: NOT VERIFIED: codex could not be checked; 1/1 seats observed clean." },
+  "unchecked": ["codex"],
   "withheld": ["GITHUB_TOKEN", "SSH_AUTH_SOCK"]
 }
 ```
 
-`withheld` lists names (never values) of variables in your shell that look like keys, tokens or host-agent state and that no seat receives.
+`cleanRooms` covers the seats that returned a receipt; `unchecked` names the ones that did not, and the line leads with them so a failed probe never reads as a clean room. `withheld` lists names (never values) of variables in your shell that look like keys, tokens or host-agent state and that no seat receives.
 
 You can also look at grok's view directly, without a model call, by running `grok inspect --json` in an empty directory with `HOME` and `GROK_HOME` pointed at an empty folder. Run it in your real home to see what the sandbox keeps out.
 
@@ -92,7 +93,7 @@ You can also look at grok's view directly, without a model call, by running `gro
 - **This is a configuration clean room, not a sandbox.** It relies on each vendor CLI honouring its own flags and environment. There is no OS-level isolation, container or seccomp profile. If you need a hard boundary, run consensus inside your own container.
 - **Grok is observed once per process, not per call.** The inspect runs in a sandbox built exactly like each seat's, and every seat's sandbox is fresh, so the configuration is the same; but it is not the same process as the call. Anything grok would load only at call time (for example, something fetched from a remote settings service after login) is not covered. The inspect report includes `externalCompat.remoteSettingsLoaded`; it is `false` in an empty sandbox on grok 1.0.41.
 - **Grok's inspect does not report tools.** Tools rest on `--tools ""`.
-- **Grok agents are not counted.** Grok's built-in subagents (`general-purpose`, `explore`, `plan`) always appear; with no tools a seat cannot spawn them, and a user-defined agent would come from the home directory the sandbox replaces.
+- **Grok's built-in agents are not counted.** Its own subagents (`general-purpose`, `explore`, `plan`, source `builtin`) always appear, and with no tools a seat cannot spawn them. Any other agent means something reached the sandbox, so it counts against the seat.
 - **Codex and Gemini are configured-only.** See above. Gemini's MCP lockdown is an allow-list naming a server that does not exist, and has not been verified against a live Gemini CLI.
 - **The login is copied in.** A grok seat's sandbox holds a copy of `~/.grok/auth.json`; a token grok refreshes during a call is copied back. The inspect sandbox never copies anything back.
 - **Your own vendor key reaches its seat.** An `ANTHROPIC_API_KEY` in the launching shell still reaches the Claude seat (and switches it to per-token billing); consensus warns before a run.
