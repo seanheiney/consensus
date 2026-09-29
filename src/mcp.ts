@@ -4,6 +4,7 @@ import { z } from "zod";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { answerSection } from "./bench.js";
+import { OUTCOMES, recordOutcome, runProfile } from "./calibration.js";
 import { describeCost, estimateCost } from "./cost.js";
 import { loadConfig, resolveRun } from "./config.js";
 import { credentialEnv, loadCredentials } from "./credentials.js";
@@ -112,6 +113,7 @@ export function createMcpServer(): McpServer {
               resolveTarget: () => resolveRun({ cfg, profile: escalate_to, captain, effort, env: credentialEnv() }),
               onFirstPass: async (first) => {
                 await debate?.close();
+                first.profile ??= r.profile;
                 debate = undefined;
                 pending = [];
                 await saveRun(first, runsDir).catch(() => "");
@@ -132,6 +134,7 @@ export function createMcpServer(): McpServer {
       }
       await debate?.close();
       let saved = "";
+      run.profile ??= runProfile(run, r.profile, escalate_to);
       try {
         saved = await saveRun(run, runsDir);
       } catch {
@@ -221,6 +224,29 @@ export function createMcpServer(): McpServer {
       const profiles = names.length ? names.map((n) => describeProfile(n, cfg.profiles![n]!, n === cfg.profile)).join("\n") : "No profiles defined (auto-detect is used).";
       const statuses = await scanVendors(credentialEnv());
       return { content: [{ type: "text", text: `Profiles (* = default):\n${profiles}\n\nConnections:\n${statuses.map(statusLine).join("\n")}` }] };
+    },
+  );
+
+  server.registerTool(
+    "consensus_outcome",
+    {
+      title: "Record how a panel decision turned out",
+      description: "When the user says how a decision backed by a consensus run actually went, record it against that run (right, wrong or partial). Outcomes feed `consensus calibration`, which shows whether the panel's stated confidence can be trusted. Re-recording replaces the verdict and keeps the old one in history.",
+      inputSchema: {
+        run_id: z.string().describe("Run id from the consensus result ('Full debate: .consensus/runs/<id>/...') or 'latest'."),
+        outcome: z.enum(OUTCOMES).describe("right: the panel's answer held up; wrong: it did not; partial: some of it did."),
+        note: z.string().optional().describe("One sentence on what happened, in the user's words."),
+      },
+      annotations: { title: "Record outcome", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    async ({ run_id, outcome, note }) => {
+      try {
+        const cfg = await loadConfig();
+        const { record, previous } = await recordOutcome(run_id, outcome, { note, dir: cfg.runsDir });
+        return { content: [{ type: "text" as const, text: `Recorded ${record.outcome} for run ${record.runId}${previous ? ` (replacing ${previous.outcome}; the earlier verdict stays in history)` : ""}. \`consensus calibration\` shows how the panel's confidence has held up.` }] };
+      } catch (err) {
+        return { isError: true, content: [{ type: "text" as const, text: (err as Error).message }] };
+      }
     },
   );
 

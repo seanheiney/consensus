@@ -222,6 +222,8 @@ export interface ConsensusRun {
   verification?: Verification;
   /** Set when a cheaper panel answered first and this run was promoted from it (opt-in --escalate). */
   escalation?: { fromRunId: string; fromSeats: string[]; reason: string; firstPassConverged: boolean };
+  /** Profile the panel came from, when one was used; `consensus calibration` groups outcomes by it. */
+  profile?: string;
 }
 
 export type ConsensusEvent =

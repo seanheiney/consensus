@@ -79,6 +79,7 @@ consensus profiles                             # list model profiles
 - When \`verify\` ran, the report lists claims the supplied material does not establish. Those are the panel's assumptions: check them or tell the user about them, do not quietly adopt them.
 - When the run escalated, the report says which panel answered first and why it was promoted.
 - If the decision is one the repo should remember (architecture, schema, migration, a tradeoff someone will re-litigate later), offer to run \`consensus adr\`: it writes the question, decision, confidence, dissents and a replay command to \`docs/decisions/NNNN-*.md\` for the user to commit.
+- If the user later tells you how a panel-backed decision turned out, offer to record it with the \`consensus_outcome\` tool (or \`consensus outcome <run-id> right|wrong|partial --note "..."\`); \`consensus calibration\` then shows whether the panel's confidence deserves trust.
 - Every run is saved under \`.consensus/runs/<id>/\` with \`debate.md\` (the full debate: each answer, every critique and dispute, each concession or rebuttal, the synthesis). If the user wants to dig in, run \`consensus runs\` to list and \`consensus log [id]\` to read one.
 `;
 
