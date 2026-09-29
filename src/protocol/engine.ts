@@ -15,11 +15,14 @@ import type {
   Usage,
 } from "../types.js";
 import { foldIsolation } from "../providers/isolation.js";
+import { cleanRooms } from "../providers/cleanroom.js";
+import { runKey } from "../runkey.js";
 import { extractJson } from "./json.js";
-import { CritiqueSchema, ModerationSchema, RevisionSchema } from "./schemas.js";
-import { CAPTAIN_PROMPT, SYSTEM_PROMPT, critiquePrompt, moderatorPrompt, problemBlock, proposePrompt, revisePrompt, synthesizePrompt, debateLeak, standaloneRepairPrompt } from "./prompts.js";
+import { CritiqueSchema, ModerationSchema, RevisionSchema, VerificationSchema } from "./schemas.js";
+import { CAPTAIN_PROMPT, SYSTEM_PROMPT, critiquePrompt, moderatorPrompt, problemBlock, proposePrompt, revisePrompt, synthesizePrompt, verifyPrompt, debateLeak, standaloneRepairPrompt } from "./prompts.js";
 import { z, type ZodType } from "zod";
 import { CostLimitError, describeCost, estimateCost } from "../cost.js";
+import { CompromisedError, escapeUntrusted, extractInjections, injectionsForJudge, mergeInjections, unionReports, type InjectionReport } from "../quarantine.js";
 
 const TRANSIENT = /429|rate.?limit|overloaded|529|503|timeout|timed out|ECONNRESET|EPIPE|temporar|try again|SIGTERM/i;
 
@@ -118,6 +121,7 @@ export class ConsensusEngine {
         for (const [id, u] of Object.entries(this.retiredUsage)) run.usage[id] ??= u;
         const c = estimateCost(run.usage);
         run.cost = { billedUsd: c.usd, subscriptionEquivUsd: c.subscriptionEquivUsd, unpriced: c.unpriced, summary: describeCost(c) };
+        run.cleanRooms = cleanRooms(run.isolation);
         run.finishedAt = new Date().toISOString();
         e.partial = run;
       }
@@ -135,6 +139,10 @@ export class ConsensusEngine {
     const seed = this.opts.seed ?? (Math.floor(Math.random() * 0xffffffff) >>> 0);
     const rnd = mulberry32(seed);
     this.rnd = rnd;
+    // Quarantine: the panel sees the question followed by the wrapped untrusted material; run.json keeps the question as asked.
+    const q = this.opts.quarantine;
+    const asked = prompt;
+    if (q) prompt = q.frame(prompt);
 
     // Anonymize: shuffle label assignment so labels carry no provider signal.
     const states: PanelistState[] = shuffle(this.opts.panel, rnd).map((panelist, i) => ({
@@ -149,7 +157,7 @@ export class ConsensusEngine {
       schemaVersion: 1,
       id: newRunId(),
       startedAt: new Date().toISOString(),
-      prompt,
+      prompt: asked,
       context,
       options: { rounds, defaultEffort: effort, maxCostUsd: this.opts.maxCostUsd, maxSpendUsd: this.opts.maxSpendUsd, seed },
       labels: Object.fromEntries(states.map((s) => [s.label, s.panelist.id])),
@@ -163,6 +171,7 @@ export class ConsensusEngine {
         persona: s.panelist.persona,
         billing: s.panelist.billing,
       })),
+      key: runKey({ prompt: asked, context: q ? q.keyContext(context) : context, seats: states.map((s) => s.panelist.id), rounds, effort }),
       proposals: {},
       rounds: [],
       finalAnswers: {},
@@ -174,17 +183,18 @@ export class ConsensusEngine {
       dropped: {},
       // Shared with callWith, so a partial run saved on failure carries the receipts gathered so far.
       isolation: (this.isolation = {}),
+      ...(q ? { quarantine: q.record() } : {}),
     };
 
     this.current = run;
     this.liveStates = states;
-    this.emit({ type: "start", runId: run.id, labels: run.labels, seats: run.seats, prompt, context, rounds, effort });
+    this.emit({ type: "start", runId: run.id, labels: run.labels, seats: run.seats, prompt: asked, context, rounds, effort });
 
     // ---- Phase 1: independent proposals -------------------------------
     this.emit({ type: "phase", phase: "propose" });
     await this.forEachActive(states, "propose", async (s) => {
       const res = await this.call(s, [{ role: "user", content: proposePrompt(prompt, context), cachedPrefix: problemBlock(prompt, context) }], "propose");
-      s.answer = res.trim();
+      s.answer = this.screen(s, res.trim());
       this.emit({ type: "proposal", label: s.label, panelist: s.panelist.id, text: s.answer, reasoning: s.reasoning });
     });
     this.requireQuorum(states, run);
@@ -276,7 +286,7 @@ export class ConsensusEngine {
           "revise",
         );
         revisions[s.label] = r;
-        s.answer = r.answer.trim();
+        s.answer = r.answer = this.screen(s, r.answer.trim());
         this.emit({ type: "revision", label: s.label, panelist: s.panelist.id, round, revision: r });
       });
       this.requireQuorum(states, run);
@@ -285,6 +295,13 @@ export class ConsensusEngine {
 
     // ---- Synthesis -----------------------------------------------------
     run.finalAnswers = this.answers(states);
+    // Only seats still standing (compromised seats are dropped) count toward the merged injection list.
+    const mergeFindings = (): void => {
+      if (!q || !run.quarantine) return;
+      run.quarantine.reports = Object.fromEntries(this.active(states).map((s) => [s.label, this.injections[s.label] ?? null]));
+      run.quarantine.findings = mergeInjections(run.quarantine.reports, q.docs);
+    };
+    mergeFindings();
     this.emit({ type: "phase", phase: "synthesize" });
     const onPanel = states.some((s) => s.panelist.id === judge.id);
     const judgeState = states.find((s) => s.panelist.id === judge.id && s.active);
@@ -320,7 +337,7 @@ export class ConsensusEngine {
             lastCritiques,
             moderations: run.rounds.filter((rr) => rr.moderation).map((rr) => ({ round: rr.round, moderation: rr.moderation! })),
             revisions: run.rounds.flatMap((rr) =>
-              Object.entries(rr.revisions ?? {}).map(([label, rev]) => ({
+              Object.entries(rr.revisions ?? {}).filter(([label]) => ![...this.tainted].some((t) => t.label === label)).map(([label, rev]) => ({
                 round: rr.round,
                 label,
                 positionChanged: rev.position_changed,
@@ -328,37 +345,65 @@ export class ConsensusEngine {
                 rebutted: rev.responses.filter((x) => x.action === "rebut").map((x) => x.claim),
               })),
             ),
-          }),
+          }) + (q && run.quarantine ? injectionsForJudge(run.quarantine.findings, q) : ""),
         },
       ],
       "synthesize",
     );
-    let synthesis: string;
+    let synthesis = "";
     let writer = synthesizer;
-    try {
-      synthesis = await synthesize(synthesizer, synthesisSystem);
-    } catch (err) {
-      // The reporter failed outright (every stand-in too): a seat that argued the case writes the report rather than losing the debate.
-      const seat = synthesizer === external ? this.active(states).find((x) => x !== external) : undefined;
-      if (!seat || this.opts.signal?.aborted) throw err;
-      this.emit({ type: "panelist:error", label: synthesizer.label, panelist: synthesizer.panelist.id, phase: "synthesize", error: `${(err as Error).message.split("\n")[0]} (seat ${seat.label} writes the report instead)`, dropped: false });
-      writer = seat;
-      synthesis = await synthesize(seat, SYSTEM_PROMPT);
-    }
-    run.judge = writer.panelist.id;
-    // Guard: the Answer section must read on its own. One rewrite if it leaks debate references.
-    const leak = debateLeak(synthesis);
-    if (leak && !this.opts.signal?.aborted) {
+    let writerSystem = synthesisSystem;
+    // Quarantine: a writer that leaks the canary while writing, repairing or checking the report loses the report too, and the next seat writes it.
+    for (;;) {
       try {
-        const writerSystem = captain && writer.panelist.id === captain.id ? CAPTAIN_PROMPT : SYSTEM_PROMPT;
-        const fixed = await this.callWith(writer, writerSystem, [{ role: "user", content: `Report to fix:\n\n${synthesis}` }, { role: "assistant", content: "Understood." }, { role: "user", content: standaloneRepairPrompt(leak) }], "synthesize");
-        if (/^#\s+Answer\s*$/m.test(fixed) && !debateLeak(fixed)) synthesis = fixed;
-      } catch {
-        /* keep the original report */
+        synthesis = await synthesize(writer, writerSystem);
+        // Guard: the Answer section must read on its own. One rewrite if it leaks debate references.
+        const leak = debateLeak(synthesis);
+        if (leak && !this.opts.signal?.aborted) {
+          try {
+            const fixSystem = captain && writer.panelist.id === captain.id ? CAPTAIN_PROMPT : SYSTEM_PROMPT;
+            const fixed = await this.callWith(writer, fixSystem, [{ role: "user", content: `Report to fix:\n\n${synthesis}` }, { role: "assistant", content: "Understood." }, { role: "user", content: standaloneRepairPrompt(leak) }], "synthesize");
+            if (/^#\s+Answer\s*$/m.test(fixed) && !debateLeak(fixed)) synthesis = fixed;
+          } catch (err) {
+            if (err instanceof CompromisedError) throw err;
+            /* keep the original report */
+          }
+        }
+        run.synthesis = synthesis.trim();
+        this.emit({ type: "synthesis", panelist: writer.panelist.id, text: run.synthesis });
+
+        // Opt-in grounding pass: which of the report's claims the given material actually establishes.
+        run.verification = undefined;
+        if (this.opts.verify && !this.opts.signal?.aborted) {
+          this.emit({ type: "phase", phase: "verify" });
+          try {
+            const checked = await this.callJson(writer, [{ role: "user", content: verifyPrompt({ prompt, context, synthesis: run.synthesis }) }], VerificationSchema, "verify");
+            run.verification = { by: writer.panelist.id, claims: checked.claims, note: checked.note };
+            this.emit({ type: "verification", panelist: writer.panelist.id, verification: run.verification });
+          } catch (err) {
+            if (err instanceof CompromisedError) throw err;
+            // A failed check must not cost the panel its answer; the report says the pass did not complete.
+            run.verification = { by: writer.panelist.id, claims: [], note: `verification did not complete: ${(err as Error).message.split("\n")[0]}` };
+          }
+        }
+        break;
+      } catch (err) {
+        // The reporter failed outright (every stand-in too): a seat that argued the case writes the report rather than losing the debate.
+        const seat = writer === external || err instanceof CompromisedError ? this.active(states).find((x) => x !== external) : undefined;
+        if (!seat || this.opts.signal?.aborted) throw err;
+        if (err instanceof CompromisedError) {
+          // A compromised writer: its answer, critiques and revisions leave the record the stand-in synthesizes from.
+          const live = new Set(this.active(states).map((x) => x.label));
+          run.finalAnswers = this.answers(states);
+          if (lastCritiques) lastCritiques = Object.fromEntries(Object.entries(lastCritiques).filter(([l]) => live.has(l)).map(([l, c]) => [l, { ...c, reviews: c.reviews.filter((r) => live.has(r.answer)) }]));
+          mergeFindings();
+        }
+        this.emit({ type: "panelist:error", label: writer.label, panelist: writer.panelist.id, phase: "synthesize", error: `${(err as Error).message.split("\n")[0]} (seat ${seat.label} writes the report instead)`, dropped: false });
+        writer = seat;
+        writerSystem = SYSTEM_PROMPT;
       }
     }
-    run.synthesis = synthesis.trim();
-    this.emit({ type: "synthesis", panelist: writer.panelist.id, text: run.synthesis });
+    run.judge = writer.panelist.id;
 
     for (const s of states) if (s.usage.reported) run.usage[s.panelist.id] = { ...s.usage, reported: undefined, billing: s.panelist.billing };
     if (this.captainState?.usage.reported && !run.usage[this.captainState.panelist.id]) run.usage[this.captainState.panelist.id] = { ...this.captainState.usage, reported: undefined, billing: this.captainState.panelist.billing };
@@ -366,6 +411,7 @@ export class ConsensusEngine {
     if (captain) run.captain = captain.id;
     const c = estimateCost(run.usage);
     run.cost = { billedUsd: c.usd, subscriptionEquivUsd: c.subscriptionEquivUsd, unpriced: c.unpriced, summary: describeCost(c) };
+    run.cleanRooms = cleanRooms(run.isolation);
     run.finishedAt = new Date().toISOString();
     this.emit({ type: "done", run });
     return run;
@@ -470,6 +516,7 @@ export class ConsensusEngine {
       if (this.current) {
         this.current.finalAnswers = this.answers(states);
         for (const s of states) if (s.usage.reported) this.current.usage[s.panelist.id] = { ...s.usage, reported: undefined, billing: s.panelist.billing };
+        this.current.cleanRooms = cleanRooms(this.current.isolation);
         this.current.finishedAt = new Date().toISOString();
         err.partial = this.current;
       }
@@ -504,7 +551,7 @@ export class ConsensusEngine {
 
   private completeFor(s: PanelistState, system: string, messages: ChatMessage[], phase: CompletionRequest["phase"], json: boolean, jsonSchema?: Record<string, unknown>) {
     return s.panelist.complete({
-      system,
+      system: this.opts.quarantine ? `${system}\n\n${this.opts.quarantine.systemRule()}` : system,
       messages,
       json,
       jsonSchema,
@@ -519,6 +566,7 @@ export class ConsensusEngine {
     const before = s.panelist.id;
     const beforeBilling = s.panelist.billing;
     const priorUsage = { ...s.usage };
+    if (this.tainted.has(s)) throw new CompromisedError(`${phase ?? "call"}, after an earlier leak`);
     let res;
     try {
       res = await this.completeFor(s, system, messages, phase, json, jsonSchema);
@@ -531,12 +579,42 @@ export class ConsensusEngine {
       }
     }
     addUsage(s.usage, res.usage);
+    if (this.opts.quarantine?.leaked(res.text)) {
+      this.compromise(s, phase ?? "call");
+      throw new CompromisedError(phase ?? "call");
+    }
     // API adapters attach no tools to their requests; CLI adapters return their own receipt.
     const receipt = res.isolation ?? (CLI_PROVIDERS.has(s.panelist.provider) ? undefined : { route: "api" as const, evidence: "request" as const });
     if (receipt) this.isolation[s.panelist.id] = foldIsolation(this.isolation[s.panelist.id], receipt);
     if (res.servedBy && res.servedBy !== s.panelist.model) this.emit({ type: "served-by", label: s.label, panelist: s.panelist.id, model: res.servedBy, phase: phase ?? "call" });
     if (phase === "propose" && res.reasoning) s.reasoning = res.reasoning;
     return res.text;
+  }
+
+  /** Quarantine: per-seat injection lists, accumulated over the seat's answers. */
+  private injections: Record<string, InjectionReport[] | null> = {};
+  /** Participants whose output contained the canary; every later call they would make fails. */
+  private tainted = new Set<PanelistState>();
+
+  /** Quarantine: strip the seat's `injections` block from its answer and keep the list. */
+  private screen(s: PanelistState, answer: string): string {
+    if (!this.opts.quarantine) return answer;
+    const { answer: clean, reports } = extractInjections(answer);
+    this.injections[s.label] = unionReports(this.injections[s.label], reports);
+    // A seat's answer is replayed to the others outside the quarantine: it must not carry a marker that looks like ours.
+    return escapeUntrusted(clean).text;
+  }
+
+  /** Quarantine: the canary showed up in this participant's output. Seats are dropped, so their vote never reaches the synthesis. */
+  private compromise(s: PanelistState, phase: string): void {
+    this.tainted.add(s);
+    const role: "seat" | "captain" | "judge" = s === this.captainState ? (phase === "moderate" ? "captain" : "judge") : s.label === "J" ? "judge" : "seat";
+    if (role === "seat") {
+      s.active = false;
+      s.error = `${phase}: ${new CompromisedError(phase).message}`;
+      if (this.current) this.current.dropped[s.panelist.id] = s.error;
+    }
+    this.current?.quarantine?.compromised.push({ id: s.panelist.id, role, ...(role === "seat" ? { label: s.label } : {}), phase });
   }
 
   /** Call, parse JSON, validate; on failure ask the model once to repair. */

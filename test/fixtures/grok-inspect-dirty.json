@@ -1,0 +1,134 @@
+{
+  "grokVersion": "1.0.41",
+  "channel": "unknown",
+  "cwd": "/home/u/project",
+  "projectRoot": "/home/u/project",
+  "projectTrusted": true,
+  "projectInstructions": [
+    {
+      "path": "/home/u/.grok/Agents.md",
+      "scope": "user",
+      "fileType": "agents",
+      "sizeBytes": 2048,
+      "approxTokens": 512
+    }
+  ],
+  "hooks": [
+    {
+      "event": "PreToolUse",
+      "hookType": "command",
+      "matcher": "*",
+      "target": "guard.sh",
+      "vendor": "claude",
+      "compatibilityStatus": "compatible",
+      "source": {
+        "type": "user",
+        "path": "/home/u/.claude"
+      }
+    }
+  ],
+  "skills": [
+    {
+      "name": "code-review",
+      "description": "Review a diff",
+      "userInvocable": true,
+      "source": {
+        "type": "user",
+        "path": "/home/u/.grok/skills/code-review/SKILL.md"
+      }
+    },
+    {
+      "name": "brainstorm",
+      "description": "Plugin skill",
+      "userInvocable": true,
+      "source": {
+        "type": "plugin",
+        "plugin_name": "superpowers",
+        "path": "/home/u/.grok/installed-plugins/superpowers-0000/skills/brainstorm/SKILL.md"
+      }
+    },
+    {
+      "name": "docs",
+      "description": "Ships with grok",
+      "userInvocable": true,
+      "source": {
+        "type": "bundled",
+        "path": "/home/u/.grok/bundled/skills/docs/SKILL.md"
+      }
+    }
+  ],
+  "agents": [
+    {
+      "name": "general-purpose",
+      "description": "General purpose agent for multi-step tasks.",
+      "source": {
+        "type": "builtin"
+      }
+    },
+    {
+      "name": "explore",
+      "description": "Fast, read-only agent specialized for codebase exploration.",
+      "source": {
+        "type": "builtin"
+      }
+    },
+    {
+      "name": "plan",
+      "description": "Software architect for planning implementation strategies.",
+      "source": {
+        "type": "builtin"
+      }
+    }
+  ],
+  "plugins": [
+    {
+      "name": "superpowers",
+      "path": "/home/u/.grok/installed-plugins/superpowers-0000",
+      "scope": "user",
+      "enabled": true,
+      "provides": [
+        "skills",
+        "hooks"
+      ]
+    }
+  ],
+  "marketplaces": [],
+  "mcpServers": [
+    {
+      "name": "github",
+      "transport": "stdio",
+      "target": "github-mcp",
+      "source": {
+        "type": "configToml",
+        "path": "/home/u/.grok/config.toml"
+      }
+    }
+  ],
+  "lspServers": [],
+  "configSources": {
+    "layers": []
+  },
+  "externalCompat": {
+    "remoteSettingsLoaded": false,
+    "cells": [
+      {
+        "vendor": "claude",
+        "surface": "skills",
+        "enabled": true,
+        "source": "default"
+      },
+      {
+        "vendor": "claude",
+        "surface": "rules",
+        "enabled": true,
+        "source": "default"
+      },
+      {
+        "vendor": "claude",
+        "surface": "agents",
+        "enabled": true,
+        "source": "default"
+      }
+    ]
+  }
+}

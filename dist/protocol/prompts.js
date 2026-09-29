@@ -253,3 +253,27 @@ export function debateLeak(synthesis) {
 export function standaloneRepairPrompt(leak) {
     return `Your report's Answer section refers to the debate (for example "${leak}"). A reader of the Answer section never saw the panel's answers. Rewrite the whole report with the same structure and substance, but make the Answer section stand alone: describe the recommendation itself, with no references to answers, panelists, seats or their labels. Keep attribution only in the later sections.`;
 }
+/** Grounding pass: check the report's load-bearing claims against the material the panel was given. */
+export function verifyPrompt(args) {
+    return `${problemBlock(args.prompt, args.context)}
+
+## The report to check
+
+${args.synthesis}
+
+## Your task
+
+Extract the load-bearing claims of the report: the factual and technical assertions the recommendation rests on. Ignore restatements of the question, pure judgement calls ("this is the cleaner design") and hedges.
+
+For each claim, decide how the material ABOVE (the problem statement and the context given to the panel) bears on it:
+- "supported": the material establishes it. Quote the part that does, in \`evidence\`.
+- "contradicted": the material says otherwise. Quote that part in \`evidence\`.
+- "unsupported": the material neither establishes nor contradicts it.
+
+Rules that matter:
+- Judge ONLY against the material above. A claim you believe from your own knowledge but that the material does not establish is "unsupported", not "supported". This pass exists to separate what was shown from what was assumed.
+- Do not re-argue the answer, and do not rewrite it. You are checking grounding, not correctness of judgement.
+- If the panel was given no context at all, nearly everything will be "unsupported"; say so in \`note\` and keep going.
+
+Return JSON only.`;
+}

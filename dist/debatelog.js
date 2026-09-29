@@ -37,11 +37,20 @@ export function eventToMarkdown(e) {
             return `# Debate ${e.runId}\n\n_Seats: ${seats}. Max rounds ${e.rounds}._\n\n## Problem\n\n${e.prompt}${e.context ? `\n\n### Context\n\n${e.context}` : ""}\n`;
         }
         case "phase":
-            return e.phase === "propose" ? `\n## Initial answers\n` : e.phase === "critique" ? `\n## Round ${e.round} — critiques\n` : e.phase === "revise" ? `\n## Round ${e.round} — revisions\n` : `\n## Synthesis\n`;
+            return e.phase === "propose" ? `\n## Initial answers\n` : e.phase === "critique" ? `\n## Round ${e.round} — critiques\n` : e.phase === "revise" ? `\n## Round ${e.round} — revisions\n` : e.phase === "verify" ? `\n## Grounding check\n` : `\n## Synthesis\n`;
         case "proposal":
             return `\n### Answer ${e.label} (${e.panelist})\n\n${e.text}\n${e.reasoning ? `\n<details><summary>Reasoning summary</summary>\n\n${e.reasoning}\n\n</details>\n` : ""}`;
         case "served-by":
             return `\n_${e.label} (${e.panelist}) was served by ${e.model} during ${e.phase} (refusal fallback)._\n`;
+        case "verification": {
+            const v = e.verification;
+            const lines = [`\n_Checked by ${e.panelist} against the problem and context given._`, ""];
+            for (const c of v.claims)
+                lines.push(`- **${c.support}**: ${c.claim}${c.evidence ? ` — ${c.evidence}` : ""}`);
+            if (v.note)
+                lines.push("", `_${v.note}_`);
+            return lines.join("\n") + "\n";
+        }
         case "critique":
             return `\n${formatCritique(e.label, e.panelist, e.critique)}\n`;
         case "revision":

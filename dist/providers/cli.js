@@ -9,11 +9,12 @@
  * with an allow-listed environment (seatEnv), and returns an isolation receipt.
  */
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { TransientError } from "../types.js";
 import { receiptFlags, seatEnv } from "./isolation.js";
+import { observedGrokReceipt, parseGrokInspect } from "./cleanroom.js";
 /** A single headless call is killed after this long unless the caller overrides it (see setDefaultTimeout / --timeout). */
 export let DEFAULT_TIMEOUT_MS = 20 * 60 * 1000;
 export function setDefaultTimeout(ms) {
@@ -345,6 +346,62 @@ export function createGeminiCliPanelist(opts = {}) {
         },
     };
 }
+/**
+ * An empty home for a grok seat with only the login copied in. If grok refreshes the token
+ * during the call, the new auth.json is copied back so the user's own login stays current.
+ */
+async function grokSandbox(dir) {
+    const real = join(process.env.GROK_HOME || join(homedir(), ".grok"), "auth.json");
+    const home = join(dir, "home");
+    const grokHome = join(home, ".grok");
+    await mkdir(grokHome, { recursive: true });
+    const copy = join(grokHome, "auth.json");
+    let copied;
+    try {
+        await copyFile(real, copy);
+        copied = (await stat(copy)).mtimeMs;
+    }
+    catch {
+        /* no readable login: XAI_API_KEY, or grok reports "not signed in" */
+    }
+    const env = { HOME: home, GROK_HOME: grokHome, XDG_CONFIG_HOME: join(home, ".config"), XDG_DATA_HOME: join(home, ".local", "share"), XDG_STATE_HOME: join(home, ".local", "state"), XDG_CACHE_HOME: join(home, ".cache") };
+    return {
+        env,
+        async syncBack() {
+            if (copied === undefined)
+                return;
+            try {
+                const now = await stat(copy);
+                if (now.mtimeMs > copied && now.mtimeMs > (await stat(real)).mtimeMs)
+                    await copyFile(copy, real);
+            }
+            catch {
+                /* keep the user's login as it was */
+            }
+        },
+    };
+}
+const grokSurfaces = new Map();
+/**
+ * `grok inspect --json`, once per process per binary, in a sandbox built exactly like a seat's
+ * (same temp-dir cwd holding a prompt file and the empty home, same allow-listed environment,
+ * login copied in). It makes no model call. The login copy is never synced back: inspect does not
+ * refresh tokens, and the seat's own sandbox owns that. Undefined when grok has no inspect or it fails.
+ */
+function grokSurface(bin) {
+    let s = grokSurfaces.get(bin);
+    if (!s) {
+        s = withTempDir(async (cwd) => {
+            await writeFile(join(cwd, "prompt.md"), "");
+            const sandbox = await grokSandbox(cwd);
+            const iso = isolatedEnv("grok", sandbox.env);
+            const r = await runCommand(bin, ["inspect", "--json"], { cwd, env: iso.env, inherit: false, timeoutMs: 15_000 });
+            return r.code === 0 ? parseGrokInspect(r.stdout) : undefined;
+        }).catch(() => undefined);
+        grokSurfaces.set(bin, s);
+    }
+    return s;
+}
 // ---------------------------------------------------------------------------
 // Grok  (`grok -p`)  — X/SuperGrok login or XAI_API_KEY
 // ---------------------------------------------------------------------------
@@ -372,9 +429,23 @@ export function createGrokCliPanelist(opts = {}) {
                 ];
                 if (opts.model)
                     args.push("-m", opts.model);
-                const iso = isolatedEnv("grok");
-                const res = await runCommand(bin, args, { cwd, env: iso.env, inherit: false, signal: req.signal, timeoutMs: opts.timeoutMs });
-                const isolation = { route: "cli", evidence: "configured", bin, flags: receiptFlags(args, ["--prompt-file", "--system-prompt-override", "-m"]), envPassed: iso.envPassed, envDropped: iso.envDropped };
+                // Grok reads ~/.grok (global Agents.md, skills, plugins with hooks, MCP servers, memory) and
+                // imports ~/.claude (hooks, skills, permissions). Flags cannot turn all of that off, so the
+                // seat gets its own empty HOME and GROK_HOME holding only the login.
+                const sandbox = await grokSandbox(cwd);
+                const iso = isolatedEnv("grok", sandbox.env);
+                const surface = grokSurface(bin);
+                let res;
+                try {
+                    res = await runCommand(bin, args, { cwd, env: iso.env, inherit: false, signal: req.signal, timeoutMs: opts.timeoutMs });
+                }
+                finally {
+                    await sandbox.syncBack();
+                }
+                const configured = { route: "cli", evidence: "configured", bin, flags: [...receiptFlags(args, ["--prompt-file", "--system-prompt-override", "-m"]), "HOME=<empty sandbox>", "GROK_HOME=<login only>"], envPassed: iso.envPassed, envDropped: iso.envDropped };
+                // Observed when grok's own inspect report for an identical sandbox is available; flags only otherwise.
+                const seen = await surface;
+                const isolation = seen ? observedGrokReceipt(configured, seen) : configured;
                 let text;
                 // Headless JSON may be a single object or one object per line; take the last with text.
                 for (const line of res.stdout.trim().split("\n").reverse()) {

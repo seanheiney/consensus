@@ -82,3 +82,19 @@ export declare const MODERATION_SHAPE = "{\n  \"settled\": [\"<claims every answ
 /** Human-readable schema descriptions embedded in prompts. */
 export declare const CRITIQUE_SHAPE = "{\n  \"self_review\": { \"errors\": [\"...\"], \"gaps\": [\"...\"] },\n  \"reviews\": [\n    {\n      \"answer\": \"B\",\n      \"verdict\": \"agree\" | \"disagree\",\n      \"strengths\": [\"...\"],\n      \"disputes\": [\n        { \"claim\": \"<quote or paraphrase of the specific claim>\",\n          \"problem\": \"<why it is wrong, unsupported, or missing>\",\n          \"correction\": \"<what is right instead>\",\n          \"severity\": \"major\" | \"minor\" }\n      ]\n    }\n  ]\n}";
 export declare const REVISION_SHAPE = "{\n  \"responses\": [\n    { \"from\": \"B\", \"claim\": \"<the disputed claim>\", \"action\": \"concede\" | \"rebut\" | \"partial\", \"reason\": \"<specific reason>\" }\n  ],\n  \"position_changed\": true | false,\n  \"answer\": \"<your full revised answer in markdown>\"\n}";
+/**
+ * Grounding check on the final report: each load-bearing claim against the
+ * problem and the context the panel was given, and nothing else.
+ */
+export declare const VerificationSchema: z.ZodObject<{
+    claims: z.ZodDefault<z.ZodArray<z.ZodObject<{
+        claim: z.ZodString;
+        support: z.ZodEnum<{
+            contradicted: "contradicted";
+            supported: "supported";
+            unsupported: "unsupported";
+        }>;
+        evidence: z.ZodDefault<z.ZodString>;
+    }, z.core.$strip>>>;
+    note: z.ZodDefault<z.ZodString>;
+}, z.core.$strip>;

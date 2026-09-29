@@ -249,7 +249,7 @@ export async function runSetup(o = {}) {
         p.note(results.map((r) => `${r.ok ? G.ok : G.err} ${r.id.padEnd(12)} ${r.ok ? `${(r.ms / 1000).toFixed(1)}s  "${r.sample}"` : r.error}`).join("\n"), "Live check");
     }
     // 2. Profiles ------------------------------------------------------------
-    const starters = starterProfiles(statuses);
+    const starters = starterProfiles(statuses, credentialEnv());
     cfg.profiles ??= {};
     if (Object.keys(starters).length) {
         const add = o.yes ? true : await p.confirm({ message: `Create starter profiles from your connected accounts (${Object.keys(starters).join(", ")})?`, initialValue: true });

@@ -19,9 +19,10 @@ export function fakePanelist(id: string, script: Script): Panelist & { calls: Co
 }
 
 /** Which phase a prompt belongs to, by its wording. */
-export function phaseOf(req: CompletionRequest): "propose" | "critique" | "revise" | "synthesize" | "repair" {
+export function phaseOf(req: CompletionRequest): "propose" | "critique" | "revise" | "synthesize" | "verify" | "repair" {
   const last = req.messages[req.messages.length - 1]!.content;
   if (last.startsWith("Your previous response could not be used")) return "repair";
+  if (last.includes("## The report to check")) return "verify";
   if (last.includes("You are the panel's synthesizer")) return "synthesize";
   if (last.includes("## Critiques raised against your answer")) return "revise";
   if (last.includes("Examine every answer other than your own") || last.includes("## Your task (follow-up round)")) return "critique";

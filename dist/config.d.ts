@@ -105,6 +105,10 @@ export interface ResolveOptions {
     env?: NodeJS.ProcessEnv;
     /** Called when the auto captain hands off to a stand-in (usage limit, model unavailable). */
     onCaptainSwitch?: (from: Panelist, to: Panelist, error: string) => void;
+    /** Opt-in: seat the resolved models this many times, each under a different angle (see variants.ts). */
+    variants?: number;
+    /** Opt-in: seat the angles that suit a kind of work ("code-review", "architecture", ...). */
+    task?: string;
 }
 export interface ResolvedRun {
     panel: Panelist[];
@@ -114,6 +118,11 @@ export interface ResolvedRun {
     effort: Effort;
     profile?: string;
     source: "flags" | "profile" | "config" | "auto";
+    /** Set when --variants or --for reshaped the panel. */
+    shaped?: {
+        variants?: number;
+        task?: string;
+    };
 }
 /** Split `spec+persona` into the model spec and the persona reference. */
 export declare function splitMember(member: Member): {

@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "consensus": "./dist/cli.js"
+    "consensus": "dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -25,7 +25,8 @@
     "install.sh",
     "install.ps1",
     "scripts",
-    "suites"
+    "suites",
+    "examples"
   ],
   "engines": {
     "node": ">=22"

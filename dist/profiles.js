@@ -18,8 +18,14 @@ function bail(v) {
     }
 }
 /** Materialize one preset against the connected vendors; undefined if it can't be satisfied. */
-export function materializePreset(preset, statuses) {
+export function materializePreset(preset, statuses, env = process.env) {
     const panel = [];
+    if (preset.shape === "explicit") {
+        // Seats named outright (a Groq team). Offered only when that key is present.
+        if (preset.requiresEnv && !env[preset.requiresEnv])
+            return undefined;
+        return { description: preset.description, panel: [...preset.specs], captain: "auto", rounds: preset.rounds, effort: preset.effort };
+    }
     if (preset.shape === "personas") {
         // Best available vendor in catalog order, at the requested tier.
         let base;
@@ -74,11 +80,11 @@ export function materializePreset(preset, statuses) {
     return { description: preset.description, panel, captain: "auto", rounds: preset.rounds, effort: preset.effort, ...(substitutions.length ? { substitutions } : {}) };
 }
 /** Every preset your connections can satisfy. Judges rotate across seats so no vendor is always the judge. */
-export function starterProfiles(statuses) {
+export function starterProfiles(statuses, env = process.env) {
     const out = {};
     let i = 0;
     for (const preset of PRESETS) {
-        const prof = materializePreset(preset, statuses);
+        const prof = materializePreset(preset, statuses, env);
         if (!prof)
             continue;
         // The captain (best available model, neutral when possible) moderates and reports.

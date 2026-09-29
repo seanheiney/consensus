@@ -87,6 +87,12 @@ Shaping the run:
 | `-j, --judge <spec>` | Who writes the synthesis. Must be a seat on the panel, unless written `external:<spec>`. |
 | `-r, --rounds <n>` | Max critique/revise rounds. `1` means critique only, no revision. |
 | `-e, --effort <level>` | `low\|medium\|high\|max` for seats without their own `#effort`. |
+| `--variants <n>` | Opt-in. Seat the panel's model(s) `n` times, each under a different reasoning angle. One subscription, a real debate. |
+| `--for <task>` | Opt-in. Seat the angles that suit `code-review`, `architecture`, `debug`, `security`, `product` or `estimate` (and set that task's round count). |
+| `--escalate <profile>` | Opt-in. Answer with the chosen panel first; promote to `<profile>` only if that leaves the question unsettled. |
+| `--escalate-when <rule>` | `unsettled` (default), `disputed` or `always`. |
+| `--verify` | Opt-in. After the report, check its load-bearing claims against the problem and context you supplied. |
+| `--reuse [days]` | Opt-in. If this exact question already went to this exact panel within N days (default 30), print that saved answer instead of paying again. |
 | `--max-cost <usd>` | Abort mid-run once the estimated list-price spend crosses this. Unpriced subscription seats are not counted. |
 | `--max-tokens <n>` | Cap output tokens per model call. |
 | `--no-retry` | Do not retry a seat once on a transient failure (429, 529, timeout). |
@@ -102,6 +108,49 @@ Two safety behaviours worth knowing:
 
 - **A bare single word is refused.** `consensus profils` would otherwise start a paid debate, so a short argument with no whitespace is rejected unless you write `consensus run "profils"` explicitly.
 - **Pre-flight runs before anything is spent.** Every seat's route is checked (CLI installed, logged in, key present, model driveable by the installed CLI version) and the run stops with the exact fix if one cannot work.
+
+### Cheap panels, and paying more only when it matters
+
+Nothing below is on by default: a run is exactly the panel you asked for.
+
+```bash
+# A real debate from one subscription: same model, four angles.
+consensus "Optimistic locking or a distributed lock for inventory holds?" --variants 4
+
+# The angles that suit the work, with the task's own round count.
+consensus "Review this migration plan" -c plan.md --for code-review
+
+# Cheap and fast first; only promote to the frontier panel if it stays unsettled.
+consensus "Is this rate-limiter design sound?" -P groq-fast --escalate frontier
+
+# Check the answer against the material you actually supplied.
+consensus "Does this schema support our reporting queries?" -c schema.sql --verify
+```
+
+`--escalate` never downgrades: the panel you named answers first, and the stronger profile runs only when the first pass did not converge, left a major dispute open, reported confidence below high, or lost seats. The promoted panel is handed the first answer as a draft to verify, never as an authority, and the final report says where it came from.
+
+`groq-fast` and `groq-council` (see `consensus profile presets`) seat Groq's open-weight models under different angles. They appear once `GROQ_API_KEY` is set, answer in seconds for fractions of a cent, and are the natural first tier to escalate from. As with every profile the captain is `auto` — the best available model moderates and writes the report, even when the seats are cheap. For an all-cheap run (a benchmark arm, or a hard spend ceiling), pin it: `--captain groq:openai/gpt-oss-120b#high`, or `--captain none`.
+
+### A quick disagreement check
+
+```bash
+consensus check "Is this endpoint idempotent? Answer yes or no." -c handler.ts
+consensus check "Which queue: SQS or Kafka?" --variants 3 --json
+```
+
+Every seat answers once, in parallel, with a short answer and a one-line rationale; there is no critique, revision or synthesis. If the answers normalize to the same text, that is the result. If they differ, the captain (or an external `--judge`) makes one cheap call to group them into positions, so "Postgres" and "PostgreSQL 17" count as one; with no captain, or with `--compare plain`, the grouping is normalized string comparison, which suits yes/no, a choice or a number. The output is the agreement level (unanimous, majority, split), the positions with the seats holding each, any dropped seats (reported, never counted), and `Needs human: yes|no`.
+
+Exit codes: `0` unanimous, `1` majority or split (a human should look), `2` no signal (fewer than two seats answered, or the check could not run). Agreement between models is not proof: a unanimous wrong answer is possible, and `check` is a triage signal, not a substitute for the debate. The MCP server exposes it as `consensus_check`.
+
+### Decisions your repo keeps
+
+```bash
+consensus adr                      # the last run -> docs/decisions/0007-....md
+consensus adr <run-id> --status Accepted
+consensus adr --stdout             # print it instead
+```
+
+The record holds the question, the decision, the confidence, what stayed unresolved, the panel, the grounding check if one ran, and how to replay the debate. Commit it with the change it justifies.
 
 ## Watch a run in progress
 
@@ -380,6 +429,7 @@ Two tools are exposed:
 |---|---|---|
 | `consensus` | `prompt` (required), `context`, `profile`, `panel[]`, `rounds`, `effort`, `transcript` | By default a short structured summary: `# Answer`, `# Confidence`, `# Unresolved disagreements`, the seats, whether it converged, the estimated cost, and the path to the full debate. With `transcript: true`, the whole report. |
 | `consensus_profiles` | none | The user's profiles and which vendors are connected. Cheap; call it before a long run. |
+| `consensus_check` | `prompt` (required), `context`, `profile`, `panel[]`, `variants`, `task`, `effort`, `captain`, `max_cost` | Every seat answers once, no debate: the agreement level, the positions with the seats holding each, dropped seats, and `Needs human: yes|no`. A separate tool rather than a mode of `consensus` so hosts choosing by description see a fast, cheap call, not a debate. |
 
 Runs started over MCP still write `debate.md` under `.consensus/runs/<id>/`, and send MCP progress notifications (phase, seat done, converged) when the client passes a `progressToken`. Expect 1–4 minutes for a small panel and 10+ minutes for a frontier profile at 3 rounds, and set client timeouts accordingly.
 
@@ -439,13 +489,13 @@ consensus install --project              # skill files + .mcp.json for this repo
 ```bash
 consensus setup [--yes] [--project] [--probe] [--no-first-run]
 consensus connect claude|codex|gemini|grok|openrouter
-consensus doctor [--probe] [--isolation]
+consensus doctor [--probe] [--isolation [--json]]
 consensus models
 consensus install [--project] [--skills-only] [--mcp-only]
 consensus uninstall [--purge]
 ```
 
-`consensus doctor` prints Accounts, Profiles and Hosts; `--probe` adds one tiny real call through each connection with its latency and reply. `--isolation` makes one tiny call per subscription seat and shows what that seat could reach: tools, MCP servers and plugins as the CLI reported them, its lockdown flags, and which environment variables were withheld (see [the FAQ](faq.md#what-does-the-clean-room-actually-block)). It is the right thing to paste into a bug report.
+`consensus doctor` prints Accounts, Profiles and Hosts; `--probe` adds one tiny real call through each connection with its latency and reply. `--isolation` makes one tiny call per subscription seat and shows what that seat could reach: tools, MCP servers and plugins as the CLI reported them, its lockdown flags, and which environment variables were withheld (see [the FAQ](faq.md#what-does-the-clean-room-actually-block)). It is the right thing to paste into a bug report. `--isolation --json` prints only the receipts and the run-style `cleanRooms` verdict as JSON ([docs/isolation.md](isolation.md)).
 
 ## Environment variables
 
@@ -466,6 +516,8 @@ Saved keys are handed only to the matching API client and are **never** exported
 | `0` | Success. |
 | `1` | Error: bad flags, unreachable seats at pre-flight, spend ceiling hit, no prompt, unknown profile or persona. |
 | `2` | The run finished, but the panel shrank — one or more seats were dropped after failing. The report names them. |
+
+`consensus check` uses its own codes so scripts can branch on them: `0` unanimous, `1` the models disagree (majority or split), `2` no signal (fewer than two seats answered, or an error such as an unknown profile).
 
 ## Design a panel from a brief
 

@@ -22,7 +22,7 @@ export interface CompletionRequest {
     effort?: Effort;
     signal?: AbortSignal;
     /** Which step of the protocol this call serves. */
-    phase?: "propose" | "critique" | "revise" | "moderate" | "synthesize" | "grade" | "probe";
+    phase?: "propose" | "critique" | "revise" | "moderate" | "synthesize" | "verify" | "grade" | "probe";
 }
 export interface Usage {
     inputTokens: number;
@@ -63,6 +63,14 @@ export interface IsolationReceipt {
     tools?: string[];
     mcpServers?: string[];
     plugins?: string[];
+    /** Observed skills (bundled ones suffixed "@bundled"), hooks, and instruction files (Agents.md and similar), when the CLI reports them. */
+    skills?: string[];
+    hooks?: string[];
+    instructions?: string[];
+    /** Anything else the CLI reported loading; any entry makes a seat not clean (grok: user agents, LSP servers, remote settings). */
+    other?: string[];
+    /** How "observed" evidence was gathered when not from the call itself, e.g. "grok inspect --json in an identical sandbox". */
+    observedVia?: string;
     /** Where the CLI took its credentials from, when it says ("none" = subscription login). */
     apiKeySource?: string;
 }
@@ -71,6 +79,19 @@ export interface SeatIsolation extends IsolationReceipt {
     calls: number;
     /** False if any call observed a tool (other than structured output), an MCP server or a plugin. */
     clean: boolean;
+}
+/** Which seats were verified clean and which are clean by configuration only. */
+export interface CleanRooms {
+    seats: number;
+    /** The CLI reported what it loaded, and it was nothing that counts against a seat. */
+    observedClean: string[];
+    /** Lockdown flags only: the CLI does not report what it loaded. */
+    configuredOnly: string[];
+    /** API seats: requests sent with no tools attached. */
+    api: string[];
+    notClean: string[];
+    /** e.g. "Clean rooms: 3/3 seats observed clean." */
+    line: string;
 }
 /** A model that can sit on the panel. Implemented per provider. */
 export interface Panelist {
@@ -139,6 +160,18 @@ export interface Moderation {
     /** After round 1: the remaining disputes will not move, so skip further revision and write the report. */
     stop_debate?: boolean;
 }
+/** One load-bearing claim of the report, checked against the material the panel was given. */
+export interface VerifiedClaim {
+    claim: string;
+    support: "supported" | "contradicted" | "unsupported";
+    evidence: string;
+}
+/** Result of the opt-in grounding pass (--verify). */
+export interface Verification {
+    by: string;
+    claims: VerifiedClaim[];
+    note: string;
+}
 export interface Revision {
     responses: {
         from: string;
@@ -204,6 +237,25 @@ export interface ConsensusRun {
     dropped: Record<string, string>;
     /** Per-seat isolation evidence (panelist id -> receipt folded over every call, captain and judge included). */
     isolation?: Record<string, SeatIsolation>;
+    /** Run-level trust verdict over `isolation`: observed clean vs configured-only vs not clean (see providers/cleanroom.ts). */
+    cleanRooms?: CleanRooms;
+    /** Stable key for (question, context, panel, rounds, effort); used by the opt-in --reuse. */
+    key?: string;
+    /** Grounding pass over the final report, when --verify asked for one. */
+    verification?: Verification;
+    /** Set when a cheaper panel answered first and this run was promoted from it (opt-in --escalate). */
+    escalation?: {
+        fromRunId: string;
+        fromSeats: string[];
+        reason: string;
+        firstPassConverged: boolean;
+    };
+    /** The profile the panel came from, when it came from one; `consensus calibration` groups outcomes by it and `consensus adr --recheck` seats it again. */
+    profile?: string;
+    /** The file the context was read from (`-c <file>`), so a recheck can re-read it when the saved run is gone. */
+    contextFile?: string;
+    /** Quarantine mode (--untrusted): nonce, canary, the files read, injection attempts the seats reported, and compromised seats. */
+    quarantine?: import("./quarantine.js").QuarantineRecord;
 }
 export type ConsensusEvent = {
     type: "start";
@@ -216,7 +268,7 @@ export type ConsensusEvent = {
     effort: Effort;
 } | {
     type: "phase";
-    phase: "propose" | "critique" | "revise" | "synthesize";
+    phase: "propose" | "critique" | "revise" | "synthesize" | "verify";
     round?: number;
 } | {
     type: "proposal";
@@ -240,6 +292,10 @@ export type ConsensusEvent = {
     type: "synthesis";
     panelist: string;
     text: string;
+} | {
+    type: "verification";
+    panelist: string;
+    verification: Verification;
 } | {
     type: "moderation";
     panelist: string;
@@ -310,10 +366,14 @@ export interface ConsensusOptions {
     maxCostUsd?: number;
     /** Abort once billed spend plus the list-price equivalent of subscription seats exceeds this. */
     maxSpendUsd?: number;
+    /** Opt-in: after the report, check its load-bearing claims against the problem and context given. */
+    verify?: boolean;
     /** Retry a seat once on a transient failure (rate limit, overload, timeout). Default true. */
     retry?: boolean;
     /** Seed for label assignment and answer ordering; recorded in run.json so a run's shuffles are reproducible. */
     seed?: number;
     onEvent?: (e: ConsensusEvent) => void;
     signal?: AbortSignal;
+    /** Quarantine mode: untrusted material wrapped in per-run delimiters, with a canary (see quarantine.ts). */
+    quarantine?: import("./quarantine.js").Quarantine;
 }

@@ -60,6 +60,14 @@ describe("resolveRun", () => {
     expect((await resolveRun({ cfg, env, profile: "b" })).panel[0]!.provider).toBe("openai");
     await expect(resolveRun({ cfg, env, profile: "zzz" })).rejects.toThrow(/Unknown profile/);
   });
+  it("a built-in preset resolves by name when no saved profile has it (CI)", async () => {
+    const r = await resolveRun({ cfg: {}, env: { GROQ_API_KEY: "gsk-x", PATH: "/nonexistent" }, profile: "groq-fast", captain: "none" });
+    expect(r.source).toBe("profile");
+    expect(r.rounds).toBe(1);
+    expect(r.panel.map((p) => p.provider)).toEqual(["groq", "groq", "groq"]);
+    // Without the key it is still unknown.
+    await expect(resolveRun({ cfg: {}, env: { PATH: "/nonexistent" }, profile: "groq-fast" })).rejects.toThrow(/Unknown profile/);
+  });
   it("--panel flags beat everything", async () => {
     const cfg = { profile: "a", profiles: { a: { panel: ["anthropic", "openai"] } } };
     const r = await resolveRun({ cfg, env, panel: ["openai:gpt-5.6-sol", "anthropic:claude-sonnet-5"] });

@@ -2,8 +2,8 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { ensureGitignore } from "./hosts.js";
-import { resolve, dirname as pdirname } from "node:path";
-function findGitRoot(from = process.cwd()) {
+import { isAbsolute, relative, resolve, dirname as pdirname, sep } from "node:path";
+export function findGitRoot(from = process.cwd()) {
     let d = resolve(from);
     for (;;) {
         if (existsSync(join(d, ".git")))
@@ -13,6 +13,22 @@ function findGitRoot(from = process.cwd()) {
             return undefined;
         d = up;
     }
+}
+/**
+ * A path as it should be recorded in a committed file: relative to the repo root (or the
+ * working directory outside a repo), with forward slashes. Undefined for a file outside it,
+ * so a local absolute path never lands in the repo.
+ */
+export function repoRelativePath(path, cwd = process.cwd()) {
+    const root = findGitRoot(cwd) ?? resolve(cwd);
+    const rel = relative(root, resolve(cwd, path));
+    if (!rel || rel.startsWith("..") || isAbsolute(rel))
+        return undefined;
+    return rel.split(sep).join("/");
+}
+/** Resolve a path recorded by repoRelativePath (older records may hold it as typed). */
+export function fromRepoPath(path, cwd = process.cwd()) {
+    return isAbsolute(path) ? path : join(findGitRoot(cwd) ?? resolve(cwd), path);
 }
 import { renderReport } from "./report.js";
 /** Persist a run as JSON + markdown under `<dir>/<run id>/`. Returns the run directory. */
@@ -48,6 +64,35 @@ export async function listRuns(dir = ".consensus/runs") {
         }
     }
     return out;
+}
+/**
+ * The newest saved run that answered this exact question with this exact panel,
+ * within `maxAgeDays`. Used by `--reuse`; never consulted unless asked.
+ */
+export async function findReusableRun(key, maxAgeDays, dir = ".consensus/runs") {
+    let names;
+    try {
+        names = await readdir(dir);
+    }
+    catch {
+        return undefined;
+    }
+    const cutoff = Date.now() - maxAgeDays * 86_400_000;
+    for (const id of names.sort().reverse()) {
+        try {
+            const run = JSON.parse(await readFile(join(dir, id, "run.json"), "utf8"));
+            if (run.key !== key || !run.synthesis)
+                continue;
+            const when = Date.parse(run.finishedAt ?? run.startedAt);
+            if (!Number.isFinite(when) || when < cutoff)
+                continue;
+            return { run, dir: join(dir, id), ageDays: (Date.now() - when) / 86_400_000 };
+        }
+        catch {
+            /* in-progress or broken run dir */
+        }
+    }
+    return undefined;
 }
 /** Load one run by id, or the latest when id is "latest" / omitted. */
 export async function loadRun(id, dir = ".consensus/runs") {

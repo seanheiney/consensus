@@ -8,6 +8,10 @@ Start at the [project README](../README.md) for what consensus is and the 90-sec
 |---|---|
 | [install.md](install.md) | Every install path with exact commands, what the installer does step by step and what it writes where, Node version handling, npm permissions, proxies, air-gapped installs, upgrading, uninstalling, and a troubleshooting table. |
 | [usage.md](usage.md) | CLI reference organized by task — ask, watch, replay, profiles, personas, packs, bench, MCP, library — plus the `provider[:model][#effort][+persona]` seat grammar, the model-id spelling rule, effort mapping per route, and exit codes. |
+| [ci.md](ci.md) | The GitHub Action: a cheap `check` gate that debates only on a split, reviewing a pull request with a panel, escalating only when the cheap panel is unsure, answering `/consensus` comments, and why gating on "converged" is not a substitute for tests. |
+| [quarantine.md](quarantine.md) | Reviewing untrusted plugins, skills, READMEs or PRs with `--untrusted`: nonce delimiters, the canary, how injection findings are merged, the `plugin-review` pack and demo, and the honest limits. |
+| [decisions.md](decisions.md) | `consensus adr` records and `--recheck` drift checks: verdicts, how the panel and context are chosen, exit codes, and a monthly GitHub Actions workflow. |
+| [isolation.md](isolation.md) | Clean rooms: what each seat can and cannot see, evidence levels per vendor, the run trust line, `doctor --isolation --json`, and known gaps. |
 | [faq.md](faq.md) | Does it actually help, what it costs, subscriptions and vendor terms, what the clean room blocks, privacy, dropped seats, `agree` with disputes, `--rounds 1`, bringing your own model, sharing panels, CI, and whether there is an API. |
 | [../PACKS.md](../PACKS.md) | Packs: bundling profiles, personas and a bench suite into one shareable JSON file, and publishing yours. |
 
@@ -38,4 +42,5 @@ Start at the [project README](../README.md) for what consensus is and the 90-sec
 | Can the panel read my repo? | [faq.md § Can panelists see my files?](faq.md#can-panelists-see-my-files) |
 | A seat disappeared mid-run | [faq.md § Why did a seat get dropped?](faq.md#why-did-a-seat-get-dropped) |
 | How do I wire this into my agent? | [usage.md § MCP server](usage.md#mcp-server) |
+| Does the panel's confidence mean anything? | `consensus calibration` ([usage.md](usage.md)) |
 | How do I use it from Node? | [usage.md § Library](usage.md#library) |

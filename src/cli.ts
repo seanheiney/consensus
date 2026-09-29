@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import * as p from "@clack/prompts";
 import { Command, InvalidArgumentError } from "commander";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { CATALOG, CATALOG_VENDORS, directRouteBlocker, priceLabel, routeFor } from "./catalog.js";
 import { loadConfig, loadUserConfig, resolveRun, saveUserConfig, type Config } from "./config.js";
@@ -11,7 +11,15 @@ import { configWarnings, splitMember } from "./config.js";
 import { ensureGitignore } from "./hosts.js";
 import { CostLimitError, GROQ_PRICES, describeCost, estimateCost } from "./cost.js";
 import { setDefaultTimeout } from "./providers/cli.js";
+import { TASKS, taskNames } from "./variants.js";
+import { Quarantine, loadUntrusted } from "./quarantine.js";
+import { runWithEscalation } from "./escalate.js";
+import { runKey } from "./runkey.js";
+import { DEFAULT_ADR_DIR, adrSlug, nextAdrNumber, renderAdr } from "./adr.js";
+import { calibrate, collectOutcomes, parseOutcome, recordOutcome, renderCalibration, runProfile } from "./calibration.js";
+import { recheckCommand } from "./drift.js";
 import { describeIsolation, foldIsolation, seatEnv } from "./providers/isolation.js";
+import { isolationChecks, isolationReport } from "./providers/cleanroom.js";
 import { probeSpecs, scanVendors } from "./doctor.js";
 import { installProjectMcp, installProjectSkills, listHosts, mcpLaunchCommand } from "./hosts.js";
 import { describeProfile, editProfile, materializePreset, memberLabel, profileWarnings } from "./profiles.js";
@@ -24,7 +32,7 @@ import { scanVendors as _scan } from "./doctor.js";
 import { ConsensusEngine } from "./protocol/engine.js";
 import { renderReport } from "./report.js";
 import { connectVendor, runSetup, statusLine } from "./setup.js";
-import { listRuns, loadRun, saveRun } from "./store.js";
+import { findReusableRun, listRuns, loadRun, repoRelativePath, saveRun } from "./store.js";
 import { eventToTerminal, openDebateLog } from "./debatelog.js";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -108,7 +116,14 @@ program
   .option("-f, --file <path>", "read the prompt from a file")
   .option("-c, --context <path>", "extra context file (code, docs, constraints) appended to the problem")
   .option("-P, --profile <name>", "model profile to use (see `consensus profiles`)")
+  .option("--untrusted <file>", "quarantine: material the panel must analyze but never take instructions from (a third-party plugin, a stranger's PR); wrapped in per-run delimiters with a canary, injection attempts listed in the report. Repeatable", (v: string, prev: string[] = []) => [...prev, v])
   .option("-p, --panel <specs>", "comma-separated panelists, e.g. claude,codex:gpt-5.6-sol,xai:grok-4.6#max")
+  .option("--reuse [days]", "opt-in: if this exact question was already put to this exact panel within N days (default 30), print that saved answer instead of debating again", (v: string) => { const n = Number(v); if (!(n > 0)) throw new InvalidArgumentError("must be a positive number of days"); return n; })
+  .option("--verify", "opt-in: after the report, check its load-bearing claims against the problem and context you supplied, and list what that material does not establish")
+  .option("--escalate <profile>", "opt-in: answer with the chosen panel first, and only if it leaves the question unsettled, run it again with this (stronger) profile, seeded with the first answer")
+  .option("--escalate-when <rule>", "when to promote: unsettled (default: not converged, disputes left, or confidence below high), disputed (only open disputes), always", (v: string) => { if (!["unsettled", "disputed", "always"].includes(v)) throw new InvalidArgumentError("expected unsettled, disputed or always"); return v; })
+  .option("--variants <n>", "opt-in: seat the panel's model(s) n times, each under a different reasoning angle (works with a single subscription)", parseIntArg)
+  .option("--for <task>", `opt-in: seat the angles that suit a kind of work (${taskNames()})`)
   .option("--captain <spec|auto|neutral|none>", "captain: moderates after each critique round, referees disputes, facilitates, writes the report (default auto = best available model, even if a seat uses it, as a separate thread; neutral = prefer a vendor not on the panel)")
   .option("-j, --judge <spec>", "override who writes the synthesis: a seat spec or `external:<spec>` (default: the captain)")
   .option("-r, --rounds <n>", "max critique/revise rounds", parseIntArg)
@@ -138,6 +153,7 @@ program
     const prompt = (await readPrompt(promptArg, o.file)).trim();
     if (!prompt) throw new Error("Prompt is empty");
     const context = o.context ? await readFile(o.context, "utf8") : undefined;
+    const quarantine = o.untrusted?.length ? new Quarantine(await loadUntrusted(o.untrusted)) : undefined;
 
     const r = await resolveRun({
       cfg,
@@ -147,6 +163,8 @@ program
       captain: o.captain,
       rounds: o.rounds,
       effort: o.effort,
+      variants: o.variants,
+      task: o.for,
       env: credentialEnv(),
     });
     const problems = preflight(r.panel, await _scan(credentialEnv()), credentialEnv());
@@ -161,14 +179,29 @@ program
       const cliSeats = r.panel.filter((x) => ["claude", "codex", "gemini", "grok"].includes(x.provider)).length;
       const shellKeys = [["claude", "ANTHROPIC_API_KEY"], ["codex", "OPENAI_API_KEY"], ["gemini", "GEMINI_API_KEY"], ["grok", "XAI_API_KEY"]].filter(([p, k]) => process.env[k!] && r.panel.some((x) => x.provider === p));
       for (const [p, k] of shellKeys) log(yellow(`note: ${k} is set in your shell, so the ${p} seat will bill that API key, not your subscription`));
-      log(dim(`panel${r.profile ? ` (${r.profile})` : ` (${r.source})`}: ${seats}`));
+      const shapeNote = r.shaped?.task ? ` — ${r.shaped.task}: ${TASKS[r.shaped.task]?.description ?? ""}` : r.shaped?.variants ? ` — ${r.shaped.variants} prompt variants of the same model(s)` : "";
+      log(dim(`panel${r.profile ? ` (${r.profile})` : ` (${r.source})`}: ${seats}${shapeNote}`));
       const onPanel = r.panel.some((x) => x.id === r.judge.id);
       if (r.captain) log(dim(`captain: ${r.captain.id}${r.panel.some((x) => x.model === r.captain!.model && x.provider === r.captain!.provider) ? " (same model as a seat, separate thread)" : " (not on the panel)"}: moderates each round, referees disputes, may grant one extra round, writes the report`));
       const ceilings = [o.maxCost ?? cfg.maxCostUsd ? `billed ceiling $${o.maxCost ?? cfg.maxCostUsd}` : "", o.maxSpend ?? cfg.maxSpendUsd ? `total ceiling $${o.maxSpend ?? cfg.maxSpendUsd}` : ""].filter(Boolean).join(", ");
       const fast = [...r.panel, ...(r.captain ? [r.captain] : [])].every((x) => x.provider === "groq");
       const est = estimateMinutes(r.panel.length, r.rounds, r.effort, !!r.captain, fast);
       log(dim(`judge: ${r.judge.id}${onPanel ? "" : " (external, did not debate)"}  rounds: ${r.rounds}  cost: ${cliSeats === r.panel.length ? "subscription quota" : cliSeats ? "subscription quota + API tokens" : "API tokens"}; up to ${r.panel.length * (1 + 2 * r.rounds) + 1 + (r.captain ? r.rounds : 0)} model calls${ceilings ? `; ${ceilings}` : ""}`));
+      if (quarantine) log(dim(`quarantine: ${quarantine.docs.map((d) => d.name).join(", ")} read as untrusted data (per-run delimiters, canary set); injection attempts are listed at the end of the report`));
       log(dim(`expect roughly ${est.low === est.high ? `${est.low}` : `${est.low}–${est.high}`} minute${est.high === 1 ? "" : "s"} (seats run in parallel; each round adds a critique, a captain brief and, if anything is disputed, a revision; judgment questions at high effort take the longest)`));
+    }
+    if (o.reuse) {
+      const days = typeof o.reuse === "number" ? o.reuse : 30;
+      const key = runKey({ prompt, context: quarantine ? quarantine.keyContext(context) : context, seats: r.panel.map((x) => x.id), rounds: r.rounds, effort: r.effort });
+      const hit = await findReusableRun(key, days, cfg.runsDir);
+      if (hit) {
+        if (!o.quiet) log(dim(`reusing run ${hit.run.id} from ${hit.ageDays < 1 ? "today" : `${Math.round(hit.ageDays)} day(s) ago`}: same question, same panel. Drop --reuse to debate it again.`));
+        const text = o.json ? JSON.stringify(hit.run, null, 2) : renderReport(hit.run, { transcript: o.transcript });
+        process.stdout.write(text + "\n");
+        if (o.output) await writeFile(o.output, text + "\n");
+        return;
+      }
+      if (!o.quiet) log(dim(`no saved answer to this exact question from this panel in the last ${days} day(s); debating it`));
     }
     const ac = new AbortController();
     process.once("SIGINT", () => {
@@ -195,23 +228,65 @@ program
       else pending.push(e);
     };
     if (o.timeout) setDefaultTimeout(o.timeout * 60_000);
-    const engine = new ConsensusEngine({
-      panel: r.panel,
-      judge: r.judge,
-      captain: r.captain,
-      rounds: r.rounds,
-      effort: r.effort,
-      maxTokens: o.maxTokens ?? cfg.maxTokens,
-      maxCostUsd: o.maxCost ?? cfg.maxCostUsd,
-      maxSpendUsd: o.maxSpend ?? cfg.maxSpendUsd,
-      retry: o.retry !== false,
-      seed: o.seed,
-      onEvent,
-      signal: ac.signal,
-    });
+    /** One debate with one panel. Escalation calls this twice, with its own debate log each time. */
+    const runOnce = async (resolved: typeof r, p: string, c: string | undefined): Promise<import("./types.js").ConsensusRun> => {
+      await debate?.close();
+      debate = undefined;
+      pending = [];
+      const engine = new ConsensusEngine({
+        panel: resolved.panel,
+        judge: resolved.judge,
+        captain: resolved.captain,
+        rounds: resolved.rounds,
+        effort: resolved.effort,
+        maxTokens: o.maxTokens ?? cfg.maxTokens,
+        maxCostUsd: o.maxCost ?? cfg.maxCostUsd,
+        maxSpendUsd: o.maxSpend ?? cfg.maxSpendUsd,
+        retry: o.retry !== false,
+        verify: !!o.verify,
+        seed: o.seed,
+        quarantine,
+        onEvent,
+        signal: ac.signal,
+      });
+      const done = await engine.run(p, c);
+      // Recorded so `consensus adr --recheck` can seat the same profile and re-read the context later.
+      if (resolved.profile) done.profile = resolved.profile;
+      if (o.context) {
+        // Relative to the repo, never a local absolute path: the ADR that records it is committed.
+        const rel = repoRelativePath(String(o.context));
+        if (rel) done.contextFile = rel;
+      }
+      return done;
+    };
     let run: import("./types.js").ConsensusRun;
     try {
-      run = await engine.run(prompt, context);
+      run = o.escalate
+        ? await runWithEscalation({
+            first: r,
+            when: o.escalateWhen,
+            prompt,
+            context,
+            resolveTarget: async () => {
+              const target = await resolveRun({ cfg, profile: String(o.escalate), captain: o.captain, effort: o.effort, env: credentialEnv() });
+              if (!o.quiet) log(dim(`escalating to ${String(o.escalate)}: ${target.panel.map((x) => x.id).join(", ")}`));
+              return target;
+            },
+            onDecision: (d, first) => {
+              if (o.quiet) return;
+              log(dim(d.escalate ? `first pass (${first.seats.length} seats) unsettled: ${d.reason}` : `first pass settled it: ${d.reason} — not escalating`));
+            },
+            onFirstPass: async (first) => {
+              await debate?.close();
+              first.profile ??= r.profile;
+              if (o.save !== false) {
+                const dir = await saveRun(first, cfg.runsDir).catch(() => "");
+                if (dir && !o.quiet) log(dim(`first pass saved ${dir}`));
+              }
+            },
+            runOnce: (resolved, p, c) => runOnce(resolved, p, c),
+          })
+        : await runOnce(r, prompt, context);
     } catch (err) {
       await debate?.close();
       const partial = (err as { partial?: import("./types.js").ConsensusRun }).partial;
@@ -237,9 +312,147 @@ program
     }
     if (o.output) await writeFile(o.output, out + "\n");
     if (o.save !== false) {
+      run.profile ??= runProfile(run, r.profile, o.escalate ? String(o.escalate) : undefined);
       const dir = await saveRun(run, cfg.runsDir);
       if (!o.quiet) log(dim(`saved ${dir}`));
     }
+  });
+
+// ---- check ---------------------------------------------------------------
+program
+  .command("check")
+  .description("cheap disagreement signal: every seat answers once, no debate; exit 0 unanimous, 1 not unanimous (a human should look), 2 no signal")
+  .argument("[prompt]", "the question ('-' or omitted reads stdin)")
+  .option("-f, --file <path>", "read the question from a file")
+  .option("-c, --context <path>", "extra context file appended to the question")
+  .option("-P, --profile <name>", "model profile to use (see `consensus profiles`)")
+  .option("-p, --panel <specs>", "comma-separated panelists, e.g. claude,codex:gpt-5.6-sol,xai:grok-4.6#max")
+  .option("--variants <n>", "seat the panel's model(s) n times, each under a different reasoning angle", parseIntArg)
+  .option("--for <task>", `seat the angles that suit a kind of work (${taskNames()})`)
+  .option("--captain <spec|auto|neutral|none>", "who groups the answers into positions (default auto; none = an external --judge if given, else plain comparison)")
+  .option("-j, --judge <spec>", "compare with this model when there is no captain")
+  .option("--compare <how>", "auto (default: plain comparison, the captain only when that finds more than one position) or plain (never call a model to compare)", (v: string) => { if (!["auto", "plain"].includes(v)) throw new InvalidArgumentError("expected auto or plain"); return v; })
+  .option("-e, --effort <level>", "low|medium|high|xhigh|max (default for models without their own #effort)", parseEffort)
+  .option("--max-tokens <n>", "max output tokens per call", parseIntArg)
+  .option("--max-cost <usd>", "skip the comparer call once spend billed to API keys exceeds this", (v: string) => { const n = Number(v); if (!(n > 0)) throw new InvalidArgumentError("must be a positive number"); return n; })
+  .option("--no-retry", "do not retry a seat once on a transient failure")
+  .option("--timeout <minutes>", "kill any single model call after this many minutes (default 20)", (v: string) => { const n = Number(v); if (!(n > 0)) throw new InvalidArgumentError("must be a positive number"); return n; })
+  .option("--force", "check even if pre-flight finds a seat that cannot be reached")
+  .option("--json", "print the result as JSON")
+  .option("-o, --output <path>", "write the result to a file as well as stdout")
+  .option("-q, --quiet", "no progress output on stderr")
+  // A bad flag must exit 2 (no signal), not 1, which means "the models disagree".
+  .exitOverride((err) => process.exit(err.exitCode === 0 ? 0 : 2))
+  .action(async (promptArg: string | undefined, o) => {
+    const { checkExitCode, renderCheck, runCheck } = await import("./check.js");
+    try {
+      const cfg = await loadConfig();
+      const prompt = (await readPrompt(promptArg, o.file)).trim();
+      if (!prompt) throw new Error("Prompt is empty");
+      const context = o.context ? await readFile(o.context, "utf8") : undefined;
+      const r = await resolveRun({ cfg, panel: o.panel ? String(o.panel).split(",") : undefined, profile: o.profile, judge: o.judge, captain: o.captain ?? (o.compare === "plain" ? "none" : undefined), effort: o.effort, variants: o.variants, task: o.for, env: credentialEnv() });
+      const problems = preflight(r.panel, await _scan(credentialEnv()), credentialEnv());
+      if (problems.length) {
+        const msg = `pre-flight found seats that cannot run:\n  - ${problems.join("\n  - ")}`;
+        if (!o.force) throw new Error(`${msg}\nFix the connection, change the panel, or pass --force to check without those seats.`);
+        if (!o.quiet) log(yellow(msg + "\n(continuing with --force; those seats will be reported as dropped)"));
+      }
+      // The captain groups the answers; with --captain none an external judge can, but a seat grading its own answer should not.
+      const comparer = r.captain ?? (r.panel.some((x) => x.id === r.judge.id) ? undefined : r.judge);
+      if (!o.quiet) log(dim(`check: ${r.panel.map((x) => x.id).join(", ")} answer once each; ${comparer && o.compare !== "plain" ? `${comparer.id} groups the answers if they differ` : "plain comparison"}`));
+      if (o.timeout) setDefaultTimeout(o.timeout * 60_000);
+      const ac = new AbortController();
+      process.once("SIGINT", () => ac.abort());
+      const result = await runCheck(prompt, context, {
+        panel: r.panel,
+        comparer,
+        compare: o.compare,
+        effort: r.effort,
+        maxTokens: o.maxTokens ?? cfg.maxTokens,
+        maxCostUsd: o.maxCost ?? cfg.maxCostUsd,
+        retry: o.retry !== false,
+        signal: ac.signal,
+        onEvent: (e) => {
+          if (o.quiet) return;
+          if (e.type === "seat:done") log(`  ${G.ok} ${e.seat}  ${dim(`${(e.ms / 1000).toFixed(1)}s`)}`);
+          else if (e.type === "seat:error") log(red(`  ${G.err} ${e.seat}: ${e.error} (dropped)`));
+          else log(dim(`  answers differ; ${e.by} is grouping them`));
+        },
+      });
+      const out = o.json ? JSON.stringify(result, null, 2) : renderCheck(result);
+      process.stdout.write(out + "\n");
+      if (o.output) await writeFile(o.output, out + "\n");
+      process.exitCode = checkExitCode(result);
+    } catch (err) {
+      // 1 means "the models disagree", so a check that could not run must not look like one.
+      log(red(`error: ${err instanceof Error ? err.message : String(err)}`));
+      process.exitCode = 2;
+    }
+  });
+
+// ---- adr -----------------------------------------------------------------
+program
+  .command("adr")
+  .description("write a run up as an architecture decision record in your repo")
+  .argument("[run]", "run id (default: the most recent run)")
+  .option("-d, --dir <path>", `directory for decision records (default ${DEFAULT_ADR_DIR})`)
+  .option("-s, --status <status>", "status line: Proposed, Accepted, Superseded... (default Proposed)")
+  .option("--stdout", "print the record instead of writing a file")
+  .option("--recheck [paths...]", "re-ask the question of each named record (or --all) and append a dated verdict: unchanged, refined or changed; exit 1 if any changed")
+  .option("--all", "with --recheck: every record in --dir")
+  .option("-P, --profile <name>", "with --recheck: use this profile instead of the recorded panel")
+  .option("--dry-run", "with --recheck: list what would be rechecked and with which panel; no model calls")
+  .option("--max-cost <usd>", "with --recheck: abort a recheck once spend billed to API keys exceeds this", (v: string) => { const n = Number(v); if (!(n > 0)) throw new InvalidArgumentError("must be a positive number"); return n; })
+  .option("--json", "with --recheck: print the results as JSON")
+  .action(async (id: string | undefined, o) => {
+    if (o.recheck) {
+      const paths = [...(id ? [id] : []), ...(Array.isArray(o.recheck) ? (o.recheck as string[]) : [])];
+      process.exitCode = await recheckCommand({ paths, all: o.all, dir: o.dir ?? DEFAULT_ADR_DIR, profile: o.profile, dryRun: o.dryRun, json: o.json, maxCost: o.maxCost });
+      return;
+    }
+    if (o.all || o.profile || o.dryRun || o.json || o.maxCost) throw new Error("--all, --profile, --dry-run, --max-cost and --json only apply with --recheck.");
+    const cfg = await loadConfig();
+    const { run, dir: runDir } = await loadRun(id, cfg.runsDir);
+    const dir = o.dir ?? DEFAULT_ADR_DIR;
+    const number = await nextAdrNumber(dir);
+    const text = renderAdr(run, { number, status: o.status, runDir });
+    if (o.stdout) {
+      process.stdout.write(text);
+      return;
+    }
+    const file = join(dir, `${String(number).padStart(4, "0")}-${adrSlug(run.prompt)}.md`);
+    await mkdir(dir, { recursive: true });
+    await writeFile(file, text);
+    log(`wrote ${file}`);
+    log(dim("commit it with the change it justifies; `consensus adr --status Accepted` once it ships"));
+  });
+
+// ---- outcome / calibration ------------------------------------------------
+program
+  .command("outcome")
+  .description("record how a saved run's decision turned out, so `consensus calibration` can score the panel's confidence")
+  .argument("<run>", "run id from `consensus runs`, or latest")
+  .argument("<outcome>", "right, wrong or partial")
+  .option("--note <text>", "what happened, in a sentence")
+  .action(async (id: string, outcome: string, o: { note?: string }) => {
+    const cfg = await loadConfig();
+    const { record, previous, file } = await recordOutcome(id, parseOutcome(outcome), { note: o.note, dir: cfg.runsDir });
+    log(`recorded ${record.outcome} for run ${record.runId}${previous ? dim(` (was ${previous.outcome}${previous.recordedAt ? `, recorded ${previous.recordedAt.slice(0, 10)}` : ""}; kept in history)`) : ""}`);
+    log(dim(`${file}  ·  \`consensus calibration\` to see how the panel's confidence holds up`));
+  });
+
+program
+  .command("calibration")
+  .description("how often the panel was right, bucketed by its stated confidence, convergence, open disputes and profile")
+  .option("--json", "print the buckets as JSON")
+  .option("-P, --profile <name>", "only runs from this profile")
+  .option("--since <days>", "only runs from the last N days", parseIntArg)
+  .action(async (o: { json?: boolean; profile?: string; since?: number }) => {
+    const cfg = await loadConfig();
+    const rows = await collectOutcomes(cfg.runsDir, { profile: o.profile, sinceDays: o.since });
+    const report = calibrate(rows);
+    if (o.json) return void process.stdout.write(JSON.stringify({ ...report, runs: rows }, null, 2) + "\n");
+    process.stdout.write(renderCalibration(report, { profile: o.profile, sinceDays: o.since }) + "\n");
   });
 
 // ---- runs / log ----------------------------------------------------------
@@ -293,7 +506,16 @@ program
   .description("show which subscriptions / keys are connected and which IDEs are set up")
   .option("--probe", "make one tiny live call through each connected vendor")
   .option("--isolation", "make one tiny live call per subscription seat and show what it could reach (tools, MCP servers, environment); exits 1 if any seat is not clean or could not be checked")
+  .option("--json", "with --isolation: print only the isolation receipts as JSON")
   .action(async (o) => {
+    if (o.json) {
+      if (!o.isolation) throw new Error("--json only applies to --isolation. Run `consensus doctor --isolation --json`.");
+      const specs = (await scanVendors(credentialEnv())).filter((s) => s.connected && s.via === "cli").map((s) => s.spec!);
+      const report = isolationReport(isolationChecks(await probeSpecs(specs, credentialEnv())), notableWithheld());
+      process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+      if (!report.ok) process.exitCode = 1;
+      return;
+    }
     const statuses = await scanVendors(credentialEnv());
     for (const w of configWarnings) log(yellow(`warning: ${w}`));
     log(bold("Accounts"));
@@ -330,7 +552,8 @@ program
       log(bold("\nIsolation (one tiny live call per subscription seat)"));
       if (!specs.length) log(dim("  no subscription seats connected; API seats send no tools and need no check"));
       let dirty = false;
-      for (const r of await probeSpecs(specs, credentialEnv())) {
+      const results = await probeSpecs(specs, credentialEnv());
+      for (const r of results) {
         if (!r.ok || !r.isolation) {
           log(`  ${red(G.err)} ${r.id.padEnd(12)} ${r.error ?? "no isolation receipt returned"}`);
           dirty = true;
@@ -342,6 +565,8 @@ program
         if (s.flags) log(dim(`      flags: ${s.flags.join(" ")}`));
         if (s.apiKeySource) log(dim(`      credentials: ${s.apiKeySource === "none" ? "subscription login" : s.apiKeySource}`));
       }
+      const trust = isolationReport(isolationChecks(results), []).cleanRooms;
+      if (trust) log(`  ${trust.line}  ${dim("(docs/isolation.md explains observed vs configured-only)")}`);
       const withheld = Object.keys(seatEnv("claude").env).length < Object.keys(process.env).length ? notableWithheld() : [];
       if (withheld.length) log(dim(`  withheld from every seat, e.g.: ${withheld.join(", ")}  (names only; CONSENSUS_SEAT_ENV passes extras)`));
       if (dirty) process.exitCode = 1;
@@ -431,7 +656,7 @@ profile
   .action(async () => {
     const statuses = await scanVendors(credentialEnv());
     for (const preset of PRESETS) {
-      const prof = materializePreset(preset, statuses);
+      const prof = materializePreset(preset, statuses, credentialEnv());
       log(`${prof ? green(G.ok) : dim(G.no)} ${preset.name.padEnd(14)} ${preset.description}`);
       if (prof) {
         log(dim(`    ${prof.panel.map(memberLabel).join(", ")}  rounds ${prof.rounds}`));
@@ -461,7 +686,7 @@ profile
     if (o.preset) {
       const preset = PRESETS.find((x) => x.name === o.preset);
       if (!preset) throw new Error(`Unknown preset "${o.preset}". Known: ${PRESETS.map((x) => x.name).join(", ")}`);
-      const prof = materializePreset(preset, statuses);
+      const prof = materializePreset(preset, statuses, credentialEnv());
       if (!prof) throw new Error(`Preset "${o.preset}" needs connections you don't have yet (run \`consensus doctor\`).`);
       if (o.edit) {
         p.intro(`profile from preset ${o.preset}`);

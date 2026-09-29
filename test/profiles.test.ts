@@ -42,9 +42,20 @@ describe("presets", () => {
     expect(materializePreset(PRESETS.find((p) => p.name === "frontier")!, one)).toBeUndefined();
   });
 
-  it("with all four connected every preset materializes", () => {
+  it("with all four connected every vendor preset materializes", () => {
     const all = [status("anthropic", "claude", "cli"), status("openai", "codex", "cli"), status("google", "google", "api"), status("xai", "grok", "cli"), status("openrouter", undefined)];
-    expect(Object.keys(starterProfiles(all)).sort()).toEqual(PRESETS.map((p) => p.name).sort());
+    // The Groq teams are seated outright and need that key; everything else comes from the vendors.
+    expect(Object.keys(starterProfiles(all, {})).sort()).toEqual(PRESETS.filter((p) => !p.requiresEnv).map((p) => p.name).sort());
+  });
+
+  it("offers the Groq teams only once GROQ_API_KEY is set", () => {
+    const all = [status("anthropic", "claude", "cli"), status("openai", "codex", "cli"), status("google", "google", "api"), status("xai", "grok", "cli"), status("openrouter", undefined)];
+    const withKey = starterProfiles(all, { GROQ_API_KEY: "gsk-x" });
+    expect(Object.keys(withKey).sort()).toEqual(PRESETS.map((p) => p.name).sort());
+    expect(withKey["groq-fast"]!.panel).toEqual(["groq:openai/gpt-oss-120b#high+first-principles", "groq:openai/gpt-oss-120b#high+skeptic", "groq:openai/gpt-oss-120b#high+enumerator"]);
+    // The captain is the best available model, as for any other preset; pass --captain to pin a cheap one.
+    expect(withKey["groq-fast"]!.captain).toBe("auto");
+    expect(materializePreset(PRESETS.find((p) => p.name === "groq-fast")!, all, {})).toBeUndefined();
   });
 });
 
@@ -63,7 +74,7 @@ describe("openrouter fallback", () => {
   });
   it("an OpenRouter key alone staffs every preset", () => {
     const st = [status("anthropic", undefined), status("openai", undefined), status("google", undefined), status("xai", undefined), status("openrouter", "openrouter", "api")];
-    expect(Object.keys(starterProfiles(st)).sort()).toEqual(PRESETS.map((p) => p.name).sort());
+    expect(Object.keys(starterProfiles(st, {})).sort()).toEqual(PRESETS.filter((p) => !p.requiresEnv).map((p) => p.name).sort());
   });
   it("direct connections are preferred over OpenRouter", () => {
     const st = [status("anthropic", "anthropic", "api"), status("openai", undefined), status("google", undefined), status("xai", undefined), status("openrouter", "openrouter", "api")];
