@@ -1,8 +1,11 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { MIN_N, bucket, calibrate, collectOutcomes, parseOutcome, readOutcome, recordOutcome, renderCalibration, type CalibrationRow } from "../src/calibration.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { MIN_N, bucket, calibrate, collectOutcomes, parseOutcome, readOutcome, recordOutcome, renderCalibration, runProfile, type CalibrationRow } from "../src/calibration.js";
+import { createMcpServer } from "../src/mcp.js";
 import { saveRun } from "../src/store.js";
 import type { ConsensusRun, RoundRecord } from "../src/types.js";
 
@@ -79,6 +82,28 @@ describe("outcome recording", () => {
     await expect(recordOutcome("latest", "wrong", { dir: join(dir, "missing") })).rejects.toThrow(/No saved runs/);
   });
 
+  it("accepts the run path a result printed, not just the bare id", async () => {
+    const dir = await runsDir();
+    await saveRun(run("20260920T120000Z-aaa"), dir);
+    await saveRun(run("20260921T120000Z-bbb"), dir);
+    const { record } = await recordOutcome(".consensus/runs/20260920T120000Z-aaa/debate.md", "right", { dir });
+    expect(record.runId).toBe("20260920T120000Z-aaa");
+    await expect(recordOutcome("../20260920T120000Z-aaa-x/debate.md", "right", { dir })).rejects.toThrow(/No saved run/);
+  });
+
+  it("keeps a hand-written verdict without history when re-recording, and ignores an unusable file", async () => {
+    const dir = await runsDir();
+    await saveRun(run("20260920T120000Z-aaa"), dir);
+    await saveRun(run("20260921T120000Z-bbb"), dir);
+    await writeFile(join(dir, "20260920T120000Z-aaa", "outcome.json"), JSON.stringify({ outcome: "right" }));
+    const second = await recordOutcome("20260920T120000Z-aaa", "wrong", { dir, now: new Date("2026-09-25T00:00:00Z") });
+    expect(second.previous).toMatchObject({ outcome: "right", recordedAt: "" });
+    expect(second.record.history.map((h) => h.outcome)).toEqual(["right", "wrong"]);
+    await writeFile(join(dir, "20260921T120000Z-bbb", "outcome.json"), JSON.stringify({ outcome: "RIGHT-ish" }));
+    expect(await readOutcome(join(dir, "20260921T120000Z-bbb"))).toBeUndefined();
+    expect((await collectOutcomes(dir)).map((r) => r.runId)).toEqual(["20260920T120000Z-aaa"]);
+  });
+
   it("rejects an outcome word it does not know", () => {
     expect(parseOutcome("Partial")).toBe("partial");
     expect(() => parseOutcome("maybe")).toThrow(/right, wrong or partial/);
@@ -125,6 +150,13 @@ describe("calibration math", () => {
     expect(good).toContain("Higher stated confidence has gone with better outcomes");
   });
 
+  it("does not credit the confidence line when levels scored the same", () => {
+    const rows = [...Array.from({ length: MIN_N }, () => row({ confidence: "high" })), ...Array.from({ length: MIN_N }, () => row({ confidence: "medium" }))];
+    const text = renderCalibration(calibrate(rows));
+    expect(text).toContain('No difference yet: "high" and "medium" runs scored the same');
+    expect(text).not.toContain("Higher stated confidence has gone with better outcomes");
+  });
+
   it("points at `consensus outcome` when nothing is recorded", () => {
     expect(renderCalibration(calibrate([]))).toMatch(/No recorded outcomes.*consensus outcome/);
   });
@@ -150,5 +182,40 @@ describe("collecting outcomes from saved runs", () => {
     expect((await collectOutcomes(dir, { profile: "groq-fast" })).map((r) => r.runId)).toEqual(["20260920T000000Z-mid"]);
     expect((await collectOutcomes(dir, { sinceDays: 14, now: new Date("2026-09-28T00:00:00Z") })).map((r) => r.runId)).toEqual(["20260920T000000Z-mid", "20260921T000000Z-new"]);
     expect(await collectOutcomes(join(dir, "missing"))).toEqual([]);
+  });
+});
+
+describe("profile attribution", () => {
+  it("files an escalated run under the escalation target and others under the resolved profile", () => {
+    const escalated = run("r", { escalation: { fromRunId: "f", fromSeats: ["groq:x"], reason: "did not converge", firstPassConverged: false } });
+    expect(runProfile(escalated, "groq-fast", "frontier")).toBe("frontier");
+    expect(runProfile(run("r"), "groq-fast", "frontier")).toBe("groq-fast");
+    expect(runProfile(run("r"), undefined)).toBeUndefined();
+  });
+});
+
+describe("consensus_outcome MCP tool", () => {
+  it("records against a saved run and reports an unknown id as a tool error", async () => {
+    const root = await mkdtemp(join(tmpdir(), "consensus-cal-mcp-"));
+    const dir = join(root, "runs");
+    await saveRun(run("20260920T120000Z-aaa"), dir);
+    await writeFile(join(root, "consensus.config.json"), JSON.stringify({ runsDir: dir }));
+    const cwd = process.cwd();
+    process.chdir(root);
+    const client = new Client({ name: "test", version: "0" });
+    try {
+      const [a, b] = InMemoryTransport.createLinkedPair();
+      await Promise.all([createMcpServer().connect(a), client.connect(b)]);
+      const ok = (await client.callTool({ name: "consensus_outcome", arguments: { run_id: "latest", outcome: "partial", note: "half of it held" } })) as { isError?: boolean; content: { text: string }[] };
+      expect(ok.isError).toBeFalsy();
+      expect(ok.content[0]!.text).toContain("Recorded partial for run 20260920T120000Z-aaa");
+      expect(await readOutcome(join(dir, "20260920T120000Z-aaa"))).toMatchObject({ outcome: "partial", note: "half of it held" });
+      const bad = (await client.callTool({ name: "consensus_outcome", arguments: { run_id: "nope", outcome: "right" } })) as { isError?: boolean; content: { text: string }[] };
+      expect(bad.isError).toBe(true);
+      expect(bad.content[0]!.text).toMatch(/No saved run "nope"/);
+    } finally {
+      await client.close();
+      process.chdir(cwd);
+    }
   });
 });

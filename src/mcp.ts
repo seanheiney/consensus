@@ -4,7 +4,7 @@ import { z } from "zod";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { answerSection } from "./bench.js";
-import { OUTCOMES, recordOutcome } from "./calibration.js";
+import { OUTCOMES, recordOutcome, runProfile } from "./calibration.js";
 import { describeCost, estimateCost } from "./cost.js";
 import { loadConfig, resolveRun } from "./config.js";
 import { credentialEnv, loadCredentials } from "./credentials.js";
@@ -113,6 +113,7 @@ export function createMcpServer(): McpServer {
               resolveTarget: () => resolveRun({ cfg, profile: escalate_to, captain, effort, env: credentialEnv() }),
               onFirstPass: async (first) => {
                 await debate?.close();
+                first.profile ??= r.profile;
                 debate = undefined;
                 pending = [];
                 await saveRun(first, runsDir).catch(() => "");
@@ -133,7 +134,7 @@ export function createMcpServer(): McpServer {
       }
       await debate?.close();
       let saved = "";
-      run.profile ??= escalate_to && run.escalation ? escalate_to : r.profile;
+      run.profile ??= runProfile(run, r.profile, escalate_to);
       try {
         saved = await saveRun(run, runsDir);
       } catch {
@@ -239,8 +240,8 @@ export function createMcpServer(): McpServer {
       annotations: { title: "Record outcome", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
     async ({ run_id, outcome, note }) => {
-      const cfg = await loadConfig();
       try {
+        const cfg = await loadConfig();
         const { record, previous } = await recordOutcome(run_id, outcome, { note, dir: cfg.runsDir });
         return { content: [{ type: "text" as const, text: `Recorded ${record.outcome} for run ${record.runId}${previous ? ` (replacing ${previous.outcome}; the earlier verdict stays in history)` : ""}. \`consensus calibration\` shows how the panel's confidence has held up.` }] };
       } catch (err) {

@@ -15,7 +15,7 @@ import { TASKS, taskNames } from "./variants.js";
 import { runWithEscalation } from "./escalate.js";
 import { runKey } from "./runkey.js";
 import { DEFAULT_ADR_DIR, adrSlug, nextAdrNumber, renderAdr } from "./adr.js";
-import { calibrate, collectOutcomes, parseOutcome, recordOutcome, renderCalibration } from "./calibration.js";
+import { calibrate, collectOutcomes, parseOutcome, recordOutcome, renderCalibration, runProfile } from "./calibration.js";
 import { describeIsolation, foldIsolation, seatEnv } from "./providers/isolation.js";
 import { probeSpecs, scanVendors } from "./doctor.js";
 import { installProjectMcp, installProjectSkills, listHosts, mcpLaunchCommand } from "./hosts.js";
@@ -263,6 +263,7 @@ program
             },
             onFirstPass: async (first) => {
               await debate?.close();
+              first.profile ??= r.profile;
               if (o.save !== false) {
                 const dir = await saveRun(first, cfg.runsDir).catch(() => "");
                 if (dir && !o.quiet) log(dim(`first pass saved ${dir}`));
@@ -296,7 +297,7 @@ program
     }
     if (o.output) await writeFile(o.output, out + "\n");
     if (o.save !== false) {
-      run.profile ??= o.escalate && run.escalation ? String(o.escalate) : r.profile;
+      run.profile ??= runProfile(run, r.profile, o.escalate ? String(o.escalate) : undefined);
       const dir = await saveRun(run, cfg.runsDir);
       if (!o.quiet) log(dim(`saved ${dir}`));
     }
@@ -337,7 +338,7 @@ program
   .action(async (id: string, outcome: string, o: { note?: string }) => {
     const cfg = await loadConfig();
     const { record, previous, file } = await recordOutcome(id, parseOutcome(outcome), { note: o.note, dir: cfg.runsDir });
-    log(`recorded ${record.outcome} for run ${record.runId}${previous ? dim(` (was ${previous.outcome}, recorded ${previous.recordedAt.slice(0, 10)}; kept in history)`) : ""}`);
+    log(`recorded ${record.outcome} for run ${record.runId}${previous ? dim(` (was ${previous.outcome}${previous.recordedAt ? `, recorded ${previous.recordedAt.slice(0, 10)}` : ""}; kept in history)`) : ""}`);
     log(dim(`${file}  ·  \`consensus calibration\` to see how the panel's confidence holds up`));
   });
 

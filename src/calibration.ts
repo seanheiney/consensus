@@ -5,7 +5,7 @@
  * scores those outcomes by what the run claimed at the time (stated
  * confidence, convergence, open disputes, profile or panel).
  */
-import { readdir, readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { openDisputes, statedConfidence } from "./escalate.js";
 import { listRuns } from "./store.js";
@@ -40,20 +40,30 @@ export function parseOutcome(v: string): Outcome {
   return o as Outcome;
 }
 
-/** The recorded outcome of a run directory, if one was recorded. */
+/**
+ * The recorded outcome of a run directory, if one was recorded. The file
+ * travels with the run and may be written by hand, so a record without a usable
+ * verdict counts as none, and a missing history is rebuilt from the verdict.
+ */
 export async function readOutcome(runDir: string): Promise<OutcomeRecord | undefined> {
+  let raw: Partial<OutcomeRecord> | null;
   try {
-    return JSON.parse(await readFile(join(runDir, OUTCOME_FILE), "utf8")) as OutcomeRecord;
+    raw = JSON.parse(await readFile(join(runDir, OUTCOME_FILE), "utf8")) as Partial<OutcomeRecord> | null;
   } catch {
     return undefined;
   }
+  if (!raw || typeof raw !== "object" || !OUTCOMES.includes(raw.outcome as Outcome)) return undefined;
+  const entry: OutcomeEntry = { outcome: raw.outcome as Outcome, ...(typeof raw.note === "string" && raw.note ? { note: raw.note } : {}), recordedAt: typeof raw.recordedAt === "string" ? raw.recordedAt : "" };
+  const history = Array.isArray(raw.history) && raw.history.length ? raw.history : [entry];
+  return { runId: typeof raw.runId === "string" ? raw.runId : "", ...entry, history };
 }
 
 /** Resolve a run id (or "latest") to its directory, with an actionable error for an unknown id. */
 async function findRunDir(id: string | undefined, dir: string): Promise<{ id: string; dir: string; run: ConsensusRun }> {
   const runs = await listRuns(dir);
   if (!runs.length) throw new Error(`No saved runs in ${dir}. Outcomes are recorded against a saved run; run the panel first (without --no-save).`);
-  const hit = !id || id === "latest" ? runs[0] : runs.find((r) => r.id === id);
+  // Accept the path a result printed (".consensus/runs/<id>/debate.md") as well as the bare id.
+  const hit = !id || id === "latest" ? runs[0] : runs.find((r) => r.id === id) ?? runs.find((r) => id.split(/[\\/]/).includes(r.id));
   if (!hit) throw new Error(`No saved run "${id}" in ${dir}. List runs with \`consensus runs\`, or pass "latest".`);
   const run = JSON.parse(await readFile(join(hit.dir, "run.json"), "utf8")) as ConsensusRun;
   return { id: hit.id, dir: hit.dir, run };
@@ -73,8 +83,18 @@ export async function recordOutcome(
   const entry: OutcomeEntry = { outcome, ...(o.note ? { note: o.note } : {}), recordedAt: (o.now ?? new Date()).toISOString() };
   const record: OutcomeRecord = { runId: found.id, ...entry, history: [...(prior?.history ?? []), entry] };
   const file = join(found.dir, OUTCOME_FILE);
-  await writeFile(file, JSON.stringify(record, null, 2) + "\n");
+  // Write then rename, so an interrupted write never leaves a truncated file that would drop the history.
+  await writeFile(`${file}.tmp`, JSON.stringify(record, null, 2) + "\n");
+  await rename(`${file}.tmp`, file);
   return { record, previous: prior ? { outcome: prior.outcome, note: prior.note, recordedAt: prior.recordedAt } : undefined, file, run: found.run };
+}
+
+/**
+ * The profile a finished run is filed under for calibration: the escalation
+ * target when the run was promoted to it, otherwise the profile it was resolved from.
+ */
+export function runProfile(run: ConsensusRun, resolved: string | undefined, escalateTo?: string): string | undefined {
+  return run.escalation && escalateTo ? escalateTo : resolved;
 }
 
 /** One run with a recorded outcome, reduced to what calibration buckets on. */
@@ -115,7 +135,7 @@ export async function collectOutcomes(dir = ".consensus/runs", o: { profile?: st
   const rows: CalibrationRow[] = [];
   for (const id of names.sort()) {
     const outcome = await readOutcome(join(dir, id));
-    if (!outcome || !OUTCOMES.includes(outcome.outcome)) continue;
+    if (!outcome) continue;
     let run: ConsensusRun;
     try {
       run = JSON.parse(await readFile(join(dir, id, "run.json"), "utf8")) as ConsensusRun;
@@ -186,6 +206,10 @@ function confidenceVerdict(r: CalibrationReport): string | undefined {
   if (scored.length < 2) return `Not enough outcomes per confidence level to judge calibration yet (need ${MIN_N} in at least two levels).`;
   for (let i = 1; i < scored.length; i++) {
     if (scored[i]!.accuracy! > scored[i - 1]!.accuracy!) return `Confidence is not tracking outcomes: "${scored[i]!.label}" runs scored better than "${scored[i - 1]!.label}" ones. Weigh the confidence line accordingly.`;
+  }
+  // Ties are not evidence of calibration: say so rather than credit the confidence line.
+  for (let i = 1; i < scored.length; i++) {
+    if (scored[i]!.accuracy === scored[i - 1]!.accuracy) return `No difference yet: "${scored[i - 1]!.label}" and "${scored[i]!.label}" runs scored the same, so the confidence line is not telling outcomes apart.`;
   }
   return "Higher stated confidence has gone with better outcomes so far.";
 }
