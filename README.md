@@ -48,7 +48,8 @@ You need two model connections for a panel, or one with `--variants 4` (the same
 A real run, lightly trimmed: Claude Haiku 4.5 seated three times under the `debug` angles, GPT-5.6 Sol as captain, and a `--verify` grounding pass over the result.
 
 ```text
-$ consensus "A payment service retries a failed charge 3 times with no idempotency key. Name the concrete failure this causes." \
+$ consensus "A payment service retries a failed charge 3 times with no idempotency key.
+             Name the concrete failure this causes." \
     -p claude:claude-haiku-4-5-20251001 --for debug -e low --verify
 
 # Answer
@@ -61,7 +62,7 @@ High — all provided answers agree.
 # Unresolved disagreements
 - None.
 
-Grounding check by codex:gpt-5.6-sol: 4 load-bearing claims checked against the problem and the context given
+Grounding check by codex:gpt-5.6-sol: 4 load-bearing claims checked against the material given
   — 1 supported, 0 contradicted, 3 not established by that material.
   - unsupported: the charge succeeding while its response is lost — the problem never says any attempt succeeded.
   - unsupported: "up to four identical charges" — nothing establishes that every attempt can create a charge.
@@ -106,7 +107,7 @@ consensus "Optimistic locking or a distributed lock?" --variants 4     # a real 
 
 ## Trust you can check
 
-| | |
+| Feature | What it does |
 |---|---|
 | **Grounding** | `--verify` marks each load-bearing claim in the report supported, contradicted or unsupported by the material you supplied. |
 | **Quarantine** | `--untrusted SKILL.md` reads third-party plugins, skills, READMEs or PRs as data inside per-run delimiters with a canary token. Seats report injection attempts, and a seat that leaks the canary is excluded. Try the `plugin-review` pack on the [harmless demo plugin](examples/injection-demo/): [docs/quarantine.md](docs/quarantine.md). |
@@ -159,7 +160,7 @@ A subscription seat is the vendor's own CLI, run headless in an empty directory 
 
 ## Documentation
 
-| | |
+| Guide | What is in it |
 |---|---|
 | [Install](docs/install.md) | Every install path, what the installer writes where, upgrading, uninstalling, troubleshooting |
 | [Usage](docs/usage.md) | CLI reference by task, the `provider[:model][#effort][+persona]` seat grammar, profiles, personas, packs, bench, MCP, library |
