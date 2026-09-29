@@ -5,7 +5,7 @@
  * touched: a record only ever grows a dated "Rechecked" section at the end.
  */
 import { appendFile, readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { z } from "zod";
 import type { ConsensusRun, Effort, Panelist } from "./types.js";
 import type { Config, ResolvedRun } from "./config.js";
@@ -16,7 +16,7 @@ import { preflight, scanVendors } from "./doctor.js";
 import { statedConfidence } from "./escalate.js";
 import { extractJson } from "./protocol/json.js";
 import { ConsensusEngine, toStrictJsonSchema } from "./protocol/engine.js";
-import { dim, log, progressLogger } from "./progress.js";
+import { dim, log, progressLogger, red, yellow } from "./progress.js";
 import { loadRun, saveRun } from "./store.js";
 
 export const ADR_MARKER = "consensus-adr";
@@ -44,6 +44,22 @@ export function seatSpec(seat: ConsensusRun["seats"][number]): string {
   return `${base}${seat.effort ? `#${seat.effort}` : ""}${suffix}`;
 }
 
+/** The heading escalationContext() puts before the first-pass draft it adds to an escalated run's context. */
+const ESCALATION_HEADING = "## A faster panel's first pass";
+
+/**
+ * The context the user supplied. An escalated run's saved context also carries the
+ * cheaper panel's draft; that draft is not part of the question and is cut off here.
+ */
+export function userContext(run: Pick<ConsensusRun, "context" | "escalation">): string | undefined {
+  let ctx = run.context;
+  if (ctx && run.escalation) {
+    const i = ctx.lastIndexOf(ESCALATION_HEADING);
+    if (i !== -1) ctx = ctx.slice(0, i);
+  }
+  return ctx?.trim() ? ctx : undefined;
+}
+
 export function adrMeta(run: ConsensusRun): AdrMeta {
   return {
     v: 1,
@@ -52,7 +68,7 @@ export function adrMeta(run: ConsensusRun): AdrMeta {
     panel: run.seats.map(seatSpec),
     rounds: run.options.rounds,
     effort: run.options.defaultEffort,
-    context: run.context?.trim() ? "given" : "none",
+    context: userContext(run) ? "given" : "none",
     ...(run.contextFile ? { contextFile: run.contextFile } : {}),
   };
 }
@@ -232,12 +248,14 @@ export interface RecheckResult {
   confidence?: string;
   runId?: string;
   runDir?: string;
+  /** Seats that dropped out of the new run. */
+  dropped?: string[];
 }
 
 /** Where the question and context come from, most faithful first. */
 export async function recoverInput(adr: ParsedAdr, deps: Pick<RecheckDeps, "loadSavedRun" | "readFile">): Promise<{ prompt: string; context?: string; note?: string }> {
   const saved = await deps.loadSavedRun(adr.runId).catch(() => undefined);
-  if (saved) return { prompt: saved.prompt, context: saved.context?.trim() ? saved.context : undefined };
+  if (saved) return { prompt: saved.prompt, context: userContext(saved) };
   if (adr.meta?.context === "none") return { prompt: adr.question };
   const file = adr.meta?.contextFile;
   if (file) {
@@ -264,18 +282,22 @@ export function renderRecheck(r: {
   contextNote?: string;
   confidence: string;
   runId: string;
+  /** Seats that dropped out of the new run, with why. */
+  dropped?: Record<string, string>;
 }): string {
+  const dropped = Object.entries(r.dropped ?? {});
   const lines = [
     `## Rechecked ${r.date}`,
     "",
     `- **Verdict:** ${r.verdict.verdict}`,
     `- **Panel:** ${r.panel.join(", ")} (${r.panelSource})${r.captain ? `; captain ${r.captain}` : ""}; verdict by ${r.judge}`,
     ...(r.panelNote ? [`- **Panel note:** ${r.panelNote}`] : []),
+    ...(dropped.length ? [`- **Dropped seats:** ${dropped.map(([id, why]) => `${id} (${inline(why.split("\n")[0]!)})`).join("; ")}; the verdict rests on the seats that answered`] : []),
     `- **New confidence:** ${r.confidence}`,
     `- **Run:** \`${r.runId}\` (replay: \`consensus log ${r.runId}\`)`,
     ...(r.contextNote ? [`- **Context:** ${r.contextNote}`] : []),
     "",
-    r.verdict.delta.replace(/\s*\n\s*/g, " ").trim(),
+    inline(r.verdict.delta),
     "",
     `_Appended by \`consensus adr --recheck\`. The decision above is the original record and was not edited._`,
     "",
@@ -283,6 +305,20 @@ export function renderRecheck(r: {
     "",
   ];
   return lines.join("\n");
+}
+
+/**
+ * Model-written text as one plain paragraph. HTML comment delimiters are broken up so
+ * the text cannot hide the rest of the record when rendered, or plant a marker that a
+ * later recheck would read back as the record's panel; a leading `#` cannot make a heading.
+ */
+function inline(text: string): string {
+  return text
+    .replace(/\s*\n\s*/g, " ")
+    .trim()
+    .replace(/<!--/g, "<\u200b!--")
+    .replace(/--(?=>)/g, "-\u200b-")
+    .replace(/^#/, "\\#");
 }
 
 /**
@@ -294,6 +330,10 @@ export async function recheckAdrs(files: string[], o: { dryRun?: boolean; deps: 
   const read = deps.readFile ?? ((p: string) => readFile(p, "utf8"));
   const out: RecheckResult[] = [];
   for (const file of files) {
+    if (deps.signal?.aborted) {
+      out.push({ file, status: "error", reason: "not rechecked: interrupted" });
+      continue;
+    }
     let original: string;
     try {
       original = await read(file);
@@ -332,10 +372,12 @@ export async function recheckAdrs(files: string[], o: { dryRun?: boolean; deps: 
         contextNote: input.note,
         confidence,
         runId: run.id,
+        dropped: run.dropped,
       });
       // Append only: the original bytes stay a prefix of the file.
       await appendFile(file, `${original.endsWith("\n") ? "" : "\n"}\n${section}`);
-      out.push({ ...base, status: verdict.verdict, delta: verdict.delta, confidence, runId: run.id, runDir });
+      const dropped = Object.keys(run.dropped ?? {});
+      out.push({ ...base, status: verdict.verdict, delta: verdict.delta, confidence, runId: run.id, runDir, ...(dropped.length ? { dropped } : {}) });
     } catch (err) {
       out.push({ file, status: "error", title: adr.title, reason: (err as Error).message.split("\n")[0] });
     }
@@ -414,6 +456,17 @@ export function describeRecheck(results: RecheckResult[], dryRun = false): strin
   return lines.join("\n");
 }
 
+/** The same record named twice (./a.md and a.md, or by name and again by --all) is rechecked once. */
+export function uniquePaths(paths: string[]): string[] {
+  const seen = new Set<string>();
+  return paths.filter((f) => {
+    const key = resolve(f);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export interface RecheckCliOptions {
   paths: string[];
   all?: boolean;
@@ -427,13 +480,24 @@ export interface RecheckCliOptions {
 
 /** `consensus adr --recheck`: wires the real panel, store and terminal. Returns the exit code. */
 export async function recheckCommand(o: RecheckCliOptions): Promise<number> {
-  if (!o.paths.length && !o.all) throw new Error(`Name the records to recheck (consensus adr --recheck docs/decisions/0003-....md), or pass --all to recheck every record in ${o.dir}.`);
-  const files = [...o.paths, ...(o.all ? await listAdrFiles(o.dir) : [])].filter((f, i, a) => a.indexOf(f) === i);
-  const cfg = await loadConfig();
+  let files: string[];
+  let cfg: Config;
+  try {
+    if (!o.paths.length && !o.all) throw new Error(`Name the records to recheck (consensus adr --recheck docs/decisions/0003-....md), or pass --all to recheck every record in ${o.dir}.`);
+    files = uniquePaths([...o.paths, ...(o.all ? await listAdrFiles(o.dir) : [])]);
+    cfg = await loadConfig();
+  } catch (err) {
+    // Not 1: a scheduled job reads 1 as "a decision changed".
+    log(red(`error: ${(err as Error).message}`));
+    return 3;
+  }
   const env = credentialEnv();
   let statuses: Promise<VendorStatus[]> | undefined;
   const ac = new AbortController();
-  process.once("SIGINT", () => ac.abort());
+  process.once("SIGINT", () => {
+    log(yellow("\naborting… records not yet rechecked are left as they are"));
+    ac.abort();
+  });
   const results = await recheckAdrs(files, {
     dryRun: o.dryRun,
     deps: {

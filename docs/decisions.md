@@ -68,10 +68,12 @@ A record whose original run had no context is rechecked with the question alone,
 | Code | Meaning |
 |---|---|
 | 0 | every rechecked record is unchanged or refined (skipped records do not count) |
-| 1 | at least one decision changed, or the command itself failed (bad flag, missing directory) |
-| 3 | no decision changed, but at least one recheck failed (a panel error, or a verdict that did not parse); that record was left untouched |
+| 1 | at least one decision changed |
+| 3 | no decision changed, but a recheck failed (a panel error, an interrupt, or a verdict that did not parse; that record was left untouched), or the recheck could not start (no records named, missing directory) |
 
-`--dry-run` exits 0 unless a record could not be read or its panel could not be resolved.
+`--dry-run` exits 0 unless a record could not be read or its panel could not be resolved. An unknown flag is rejected by the argument parser with exit 1 before anything runs, so a scheduled job should confirm a `changed` entry in the `--json` output before treating 1 as drift, as the workflow below does.
+
+If a seat drops out during a recheck, the appended section lists it under **Dropped seats**: the verdict then rests on the seats that answered.
 
 ## Scheduled recheck in GitHub Actions
 
@@ -107,9 +109,10 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/recheck.json"
           echo "changed=$(jq -r '[.[] | select(.status == "changed") | .file] | join(" ")' "$RUNNER_TEMP/recheck.json")" >> "$GITHUB_OUTPUT"
-          # 1 with changed records is the signal this job exists for; any other failure fails the job.
-          if [ "$code" -ne 0 ] && [ "$code" -ne 1 ]; then exit "$code"; fi
-          if [ "$code" -eq 1 ] && ! jq -e 'any(.[]; .status == "changed")' "$RUNNER_TEMP/recheck.json" > /dev/null; then exit 1; fi
+          # 1 with changed records is the signal this job exists for. Anything else fails the
+          # job in the last step, after the records that did recheck are committed.
+          if [ "$code" -eq 1 ] && jq -e 'any(.[]; .status == "changed")' "$RUNNER_TEMP/recheck.json" > /dev/null; then code=0; fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -131,6 +134,10 @@ jobs:
             gh issue create --title "Decision drift: $(head -1 "$f" | sed 's/^# //')" \
               --body "A monthly recheck found that the panel's answer no longer matches the recorded decision. See the latest \"Rechecked\" section of \`$f\`."
           done
+
+      - name: Fail if a recheck failed
+        if: steps.recheck.outputs.code != '0'
+        run: exit ${{ steps.recheck.outputs.code }}
 ```
 
 Run `--dry-run` locally first to see which panel each record will get. A recheck is a full debate, so `--max-cost` applies to each record, and a directory of twenty records costs twenty runs.
