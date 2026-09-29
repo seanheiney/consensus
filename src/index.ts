@@ -3,6 +3,7 @@ export { renderReport, renderTranscript } from "./report.js";
 export { saveRun, listRuns, loadRun, findReusableRun } from "./store.js";
 export { runKey, type RunKeyParts } from "./runkey.js";
 export { renderAdr, adrSlug, adrTitle, nextAdrNumber, DEFAULT_ADR_DIR } from "./adr.js";
+export { recordOutcome, readOutcome, collectOutcomes, calibrate, renderCalibration, OUTCOME_SCORE, MIN_N, type Outcome, type OutcomeRecord, type CalibrationReport } from "./calibration.js";
 export { openDebateLog, eventToMarkdown, eventToTerminal } from "./debatelog.js";
 export { loadConfig, loadUserConfig, saveUserConfig, resolveRun, autoDetectSpecs, ConfigSchema, ProfileSchema, type Config, type Profile } from "./config.js";
 export { PROVIDERS, VENDORS, createPanelist, detectApiProviders, detectCliProviders, parseSpec, formatSpec, specId } from "./providers/index.js";
