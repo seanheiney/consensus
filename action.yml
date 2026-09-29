@@ -174,13 +174,16 @@ runs:
           report="${RUNNER_TEMP:-/tmp}/consensus-report.md"
           node --input-type=module -e '
             import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+            import { randomBytes } from "node:crypto";
             const { renderCheck } = await import(process.env.ACTION_PATH + "/dist/index.js");
             const r = JSON.parse(readFileSync(process.argv[1], "utf8"));
             const md = renderCheck(r);
             writeFileSync(process.argv[2], md + "\n");
             const out = process.env.GITHUB_OUTPUT;
             const top = r.agreement === "unanimous" || r.agreement === "majority" ? r.positions[0].answer.replace(/\s+/g, " ") : "";
-            appendFileSync(out, `answer<<CONSENSUS_EOF\n${top}\nCONSENSUS_EOF\n`);
+            // A random delimiter: a model-written answer cannot end the value early and inject outputs.
+            const eof = `CONSENSUS_EOF_${randomBytes(16).toString("hex")}`;
+            appendFileSync(out, `answer<<${eof}\n${top}\n${eof}\n`);
             appendFileSync(out, `agreement=${r.agreement}\n`);
             appendFileSync(out, `needs-human=${r.needsHuman}\n`);
             appendFileSync(out, `report=${process.argv[2]}\n`);
@@ -198,15 +201,17 @@ runs:
 
         report="${RUNNER_TEMP:-/tmp}/consensus-report.md"
         node --input-type=module -e '
-          import { readFileSync, writeFileSync } from "node:fs";
-          import { appendFileSync } from "node:fs";
+          import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+          import { randomBytes } from "node:crypto";
           const { renderReport } = await import(process.env.ACTION_PATH + "/dist/index.js");
           const run = JSON.parse(readFileSync(process.argv[1], "utf8"));
           const md = renderReport(run);
           writeFileSync(process.argv[2], md);
           const answer = (run.synthesis.match(/^#+\s*Answer\s*\n([\s\S]*?)(?=\n#|$)/im)?.[1] ?? run.synthesis).trim();
           const out = process.env.GITHUB_OUTPUT;
-          const block = (k, v) => `${k}<<CONSENSUS_EOF\n${v}\nCONSENSUS_EOF\n`;
+          // A random delimiter: a model-written answer cannot end the value early and inject outputs.
+          const eof = `CONSENSUS_EOF_${randomBytes(16).toString("hex")}`;
+          const block = (k, v) => `${k}<<${eof}\n${v}\n${eof}\n`;
           appendFileSync(out, block("answer", answer));
           appendFileSync(out, `converged=${run.converged}\n`);
           appendFileSync(out, `run-id=${run.id}\n`);
