@@ -1,4 +1,5 @@
 import { describeIsolation, isolationSummary } from "./providers/isolation.js";
+import { renderQuarantine } from "./quarantine.js";
 import type { ConsensusRun, VerifiedClaim } from "./types.js";
 
 function fmt(n: number): string {
@@ -63,6 +64,8 @@ export function renderReport(run: ConsensusRun, opts: { transcript?: boolean } =
     lines.push("", `_${iso}_`);
     for (const [id, s] of Object.entries(run.isolation!)) lines.push(`- ${describeIsolation(id, s)}`);
   }
+
+  if (run.quarantine) lines.push(...renderQuarantine(run.quarantine, run.labels));
 
   if (opts.transcript) lines.push("", renderTranscript(run));
   return lines.join("\n");

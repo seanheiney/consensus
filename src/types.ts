@@ -222,6 +222,8 @@ export interface ConsensusRun {
   verification?: Verification;
   /** Set when a cheaper panel answered first and this run was promoted from it (opt-in --escalate). */
   escalation?: { fromRunId: string; fromSeats: string[]; reason: string; firstPassConverged: boolean };
+  /** Quarantine mode (--untrusted): nonce, canary, the files read, injection attempts the seats reported, and compromised seats. */
+  quarantine?: import("./quarantine.js").QuarantineRecord;
 }
 
 export type ConsensusEvent =
@@ -266,4 +268,6 @@ export interface ConsensusOptions {
   seed?: number;
   onEvent?: (e: ConsensusEvent) => void;
   signal?: AbortSignal;
+  /** Quarantine mode: untrusted material wrapped in per-run delimiters, with a canary (see quarantine.ts). */
+  quarantine?: import("./quarantine.js").Quarantine;
 }

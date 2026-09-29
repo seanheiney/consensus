@@ -14,6 +14,7 @@ import { ConsensusEngine } from "./protocol/engine.js";
 import { runWithEscalation } from "./escalate.js";
 import { isolationSummary } from "./providers/isolation.js";
 import { renderReport } from "./report.js";
+import { Quarantine, renderQuarantine } from "./quarantine.js";
 import { statusLine } from "./setup.js";
 import { saveRun } from "./store.js";
 import type { ConsensusEvent } from "./types.js";
@@ -67,13 +68,15 @@ export function createMcpServer(): McpServer {
         task: z.enum(["code-review", "architecture", "debug", "security", "product", "estimate"]).optional().describe("Opt-in: seat the angles that suit this kind of work (also sets a sensible round count)."),
         escalate_to: z.string().optional().describe("Opt-in: answer with the chosen panel first and, only if that leaves the question unsettled, re-run with this (stronger) profile seeded with the first answer. Cheap by default, expensive only when it matters."),
         escalate_when: z.enum(["unsettled", "disputed", "always"]).optional().describe("When to promote (default 'unsettled': not converged, disputes left open, or confidence below high)."),
+        untrusted: z.array(z.object({ name: z.string().describe("File name or label the seats cite, e.g. SKILL.md."), content: z.string() })).optional().describe("Quarantine mode: material to analyze but never obey (a third-party plugin, skill, README, web page, a stranger's PR). Each item is wrapped in per-run random delimiters with a canary token; seats report instruction-like text they find, and the reply lists the injection attempts observed. A seat that leaks the canary is dropped as compromised. Reduces, does not eliminate, injection risk."),
         verify: z.boolean().optional().describe("Opt-in: after the report, check its load-bearing claims against the prompt and context you supplied, and return which ones that material does not establish. Useful when the panel is reasoning over pasted code or docs."),
       },
       annotations: { title: "Panel consensus", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async ({ prompt, context, profile, panel, rounds, effort, transcript, max_cost, max_spend, captain, variants, task, escalate_to, escalate_when, verify }, extra) => {
+    async ({ prompt, context, profile, panel, rounds, effort, transcript, max_cost, max_spend, captain, variants, task, escalate_to, escalate_when, verify, untrusted }, extra) => {
       const cfg = await loadConfig();
       const r = await resolveRun({ cfg, panel, profile, rounds, effort, captain, variants, task, env: credentialEnv() });
+      const quarantine = untrusted?.length ? new Quarantine(untrusted) : undefined;
       const runsDir = cfg.runsDir ?? ".consensus/runs";
       const token = extra._meta?.progressToken;
       let debate: Awaited<ReturnType<typeof openDebateLog>> | undefined;
@@ -98,7 +101,7 @@ export function createMcpServer(): McpServer {
         }
       };
       const runOnce = (resolved: typeof r, p: string, c: string | undefined): Promise<import("./types.js").ConsensusRun> => {
-        const engine = new ConsensusEngine({ panel: resolved.panel, judge: resolved.judge, captain: resolved.captain, rounds: resolved.rounds, effort: resolved.effort, maxTokens: cfg.maxTokens, maxCostUsd: max_cost ?? cfg.maxCostUsd, maxSpendUsd: max_spend ?? cfg.maxSpendUsd, verify: !!verify, onEvent, signal: extra.signal });
+        const engine = new ConsensusEngine({ panel: resolved.panel, judge: resolved.judge, captain: resolved.captain, rounds: resolved.rounds, effort: resolved.effort, maxTokens: cfg.maxTokens, maxCostUsd: max_cost ?? cfg.maxCostUsd, maxSpendUsd: max_spend ?? cfg.maxSpendUsd, verify: !!verify, quarantine, onEvent, signal: extra.signal });
         return engine.run(p, c);
       };
       let run: import("./types.js").ConsensusRun;
@@ -159,6 +162,7 @@ export function createMcpServer(): McpServer {
         `Cost: ${describeCost(cost)}.`,
         run.verification ? `Grounding check: ${run.verification.claims.filter((c) => c.support === "supported").length}/${run.verification.claims.length} load-bearing claims are established by the material you supplied; ${run.verification.claims.filter((c) => c.support === "contradicted").length} contradicted. Full list in the report.` : "",
         isolationSummary(run.isolation) ?? "",
+        run.quarantine ? renderQuarantine(run.quarantine, run.labels).join("\n").trim() : "",
         saved ? `Full debate: ${saved}/debate.md  (or \`consensus log ${run.id}\`). Call again with transcript=true for the whole report.` : "",
       ]
         .filter(Boolean)

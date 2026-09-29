@@ -14,6 +14,9 @@ inputs:
   context-file:
     description: File whose contents are used as the context (appended after `context`).
     required: false
+  untrusted-file:
+    description: 'Quarantine mode: file(s) the panel must analyze but never take instructions from (a third-party plugin, a stranger''s PR). One path per line. Injection attempts are listed in the report.'
+    required: false
   profile:
     description: Named profile from the repo's consensus.config.json.
     required: false
@@ -90,6 +93,7 @@ runs:
         IN_PROMPT: ${{ inputs.prompt }}
         IN_CONTEXT: ${{ inputs.context }}
         IN_CONTEXT_FILE: ${{ inputs.context-file }}
+        IN_UNTRUSTED_FILE: ${{ inputs.untrusted-file }}
         IN_PROFILE: ${{ inputs.profile }}
         IN_PANEL: ${{ inputs.panel }}
         IN_VARIANTS: ${{ inputs.variants }}
@@ -129,6 +133,9 @@ runs:
         add_if_set --effort "$IN_EFFORT"
         add_if_set --escalate "$IN_ESCALATE"
         add_if_set --escalate-when "$IN_ESCALATE_WHEN"
+        while IFS= read -r uf; do
+          if [ -n "${uf// /}" ]; then args+=(--untrusted "$uf"); fi
+        done <<< "$IN_UNTRUSTED_FILE"
         if [ "$IN_VERIFY" = "true" ]; then args+=(--verify); fi
 
         # Exit 2 means the panel shrank but still answered; keep going and say so in the report.
