@@ -323,6 +323,8 @@ program
   .option("--json", "print the result as JSON")
   .option("-o, --output <path>", "write the result to a file as well as stdout")
   .option("-q, --quiet", "no progress output on stderr")
+  // A bad flag must exit 2 (no signal), not 1, which means "the models disagree".
+  .exitOverride((err) => process.exit(err.exitCode === 0 ? 0 : 2))
   .action(async (promptArg: string | undefined, o) => {
     const { checkExitCode, renderCheck, runCheck } = await import("./check.js");
     try {
@@ -330,7 +332,7 @@ program
       const prompt = (await readPrompt(promptArg, o.file)).trim();
       if (!prompt) throw new Error("Prompt is empty");
       const context = o.context ? await readFile(o.context, "utf8") : undefined;
-      const r = await resolveRun({ cfg, panel: o.panel ? String(o.panel).split(",") : undefined, profile: o.profile, judge: o.judge, captain: o.captain, effort: o.effort, variants: o.variants, task: o.for, env: credentialEnv() });
+      const r = await resolveRun({ cfg, panel: o.panel ? String(o.panel).split(",") : undefined, profile: o.profile, judge: o.judge, captain: o.captain ?? (o.compare === "plain" ? "none" : undefined), effort: o.effort, variants: o.variants, task: o.for, env: credentialEnv() });
       const problems = preflight(r.panel, await _scan(credentialEnv()), credentialEnv());
       if (problems.length) {
         const msg = `pre-flight found seats that cannot run:\n  - ${problems.join("\n  - ")}`;

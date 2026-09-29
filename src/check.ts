@@ -132,7 +132,7 @@ export function normalizeAnswer(text: string): string {
     .normalize("NFKD")
     .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
-    .replace(/(\d),(\d{3})\b/g, "$1$2")
+    .replace(/(\d),(?=\d{3}\b)/g, "$1")
     .replace(/(\d)\.0+\b/g, "$1")
     .replace(/[^\p{L}\p{N}.%\s-]/gu, " ")
     .replace(/(?<!\d)\.|\.(?!\d)/g, " ")
@@ -142,6 +142,10 @@ export function normalizeAnswer(text: string): string {
   if (/^(yes|y|true|correct|affirmative)$/.test(t)) return "yes";
   if (/^(no|n|false|incorrect|negative)$/.test(t)) return "no";
   return t;
+}
+
+function oneLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
 }
 
 /** Short enough that exact comparison after normalization is meaningful (a word, a number, a choice). */
@@ -220,7 +224,7 @@ function applyGrouping(grouping: z.infer<typeof CheckGroupingSchema>, byLabel: M
       seen.add(label);
       seats.push(a.seat);
     }
-    if (seats.length) positions.push({ answer: pos.answer.trim() || answerOf(seats[0]!), seats });
+    if (seats.length) positions.push({ answer: oneLine(pos.answer) || answerOf(seats[0]!), seats });
   }
   const missing = [...byLabel.keys()].filter((l) => !seen.has(l));
   if (missing.length) return { error: `left answer${missing.length === 1 ? "" : "s"} ${missing.join(", ")} out of every position` };
@@ -253,7 +257,8 @@ export async function runCheck(prompt: string, context: string | undefined, o: C
           await new Promise((r) => setTimeout(r, o.retryDelayMs ?? 4000));
           a = await once();
         }
-        answered.set(p.id, { seat: p.id, answer: a.answer.trim(), rationale: a.rationale.trim().split("\n")[0]! });
+        // One line each: a newline in an answer could forge a labeled line in the comparer's prompt, or a line in CI outputs.
+        answered.set(p.id, { seat: p.id, answer: oneLine(a.answer), rationale: oneLine(a.rationale.trim().split("\n")[0]!) });
         emit({ type: "seat:done", seat: p.id, ms: Date.now() - t0 });
       } catch (err) {
         const error = (err instanceof Error ? err.message : String(err)).split("\n")[0]!;
@@ -287,6 +292,7 @@ export async function runCheck(prompt: string, context: string | undefined, o: C
           comparedBy = o.comparer.id;
         }
       } catch (err) {
+        if (o.signal?.aborted) throw new Error("Check aborted.");
         comparisonNote = `the comparer failed (${(err instanceof Error ? err.message : String(err)).split("\n")[0]}); fell back to plain comparison`;
       }
     }

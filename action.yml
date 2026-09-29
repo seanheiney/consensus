@@ -170,7 +170,7 @@ runs:
             const md = renderCheck(r);
             writeFileSync(process.argv[2], md + "\n");
             const out = process.env.GITHUB_OUTPUT;
-            const top = r.agreement === "unanimous" || r.agreement === "majority" ? r.positions[0].answer : "";
+            const top = r.agreement === "unanimous" || r.agreement === "majority" ? r.positions[0].answer.replace(/\s+/g, " ") : "";
             appendFileSync(out, `answer<<CONSENSUS_EOF\n${top}\nCONSENSUS_EOF\n`);
             appendFileSync(out, `agreement=${r.agreement}\n`);
             appendFileSync(out, `needs-human=${r.needsHuman}\n`);

@@ -111,7 +111,7 @@ A check costs one call per seat plus, only when the answers differ in wording, o
 The step itself does not fail on disagreement; branch on the outputs. `agreement` is `unanimous`, `majority`, `split`, or `insufficient` (fewer than two seats answered, so there is no signal); `needs-human` is `true` for everything but `unanimous`. A seat that fails is reported as dropped in the report and never counted towards a position. Outside the action, `consensus check` exits `0` when unanimous, `1` when not, and `2` when it could not produce a signal, so a plain shell step can gate on it too:
 
 ```bash
-consensus check "Is this migration reversible? Answer yes or no." -c migrations/0042.sql -P groq-fast || echo "models disagree: escalate"
+consensus check "Is this migration reversible? Answer yes or no." -c migrations/0042.sql -P groq-fast || echo "models disagree (exit 1) or no signal (exit 2): escalate"
 ```
 
 ## Answer a question from a PR comment
