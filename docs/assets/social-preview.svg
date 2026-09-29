@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-label="consensus: a panel of models debates until it agrees">
+<rect width="1280" height="640" rx="0" fill="#0d1117"/>
+<text x="80" y="250" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="84" font-weight="800" letter-spacing="-2" fill="#e6edf3">consensus</text>
+<rect x="80" y="272" width="92" height="6" rx="3" fill="#a78bfa"/>
+<text x="80" y="328" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="32" font-weight="500" fill="#9aa7b4">A panel of frontier models argues</text>
+<text x="80" y="372" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="32" font-weight="500" fill="#9aa7b4">until it agrees, and tells you</text>
+<text x="80" y="416" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="32" font-weight="500" fill="#9aa7b4">what it still could not settle.</text>
+<text x="80" y="482" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="22" fill="#a78bfa">$ <tspan fill="#e6edf3">consensus "your hardest question"</tspan></text>
+<circle cx="760" cy="150" r="30" fill="#161b22" stroke="#a78bfa" stroke-width="2.5"/>
+<text x="760" y="155" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#e6edf3">Claude</text>
+<circle cx="760" cy="242" r="30" fill="#161b22" stroke="#38bdf8" stroke-width="2.5"/>
+<text x="760" y="247" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#e6edf3">GPT</text>
+<circle cx="760" cy="334" r="30" fill="#161b22" stroke="#a78bfa" stroke-width="2.5"/>
+<text x="760" y="339" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#e6edf3">Grok</text>
+<circle cx="760" cy="426" r="30" fill="#161b22" stroke="#38bdf8" stroke-width="2.5"/>
+<text x="760" y="431" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#e6edf3">Gemini</text>
+<path d="M790,150 C868,150 868,242 790,242" fill="none" stroke="#fb7185" stroke-width="1.6" stroke-dasharray="5 5" opacity="0.85"/>
+<path d="M790,242 C868,242 868,334 790,334" fill="none" stroke="#fb7185" stroke-width="1.6" stroke-dasharray="5 5" opacity="0.85"/>
+<path d="M790,334 C868,334 868,426 790,426" fill="none" stroke="#fb7185" stroke-width="1.6" stroke-dasharray="5 5" opacity="0.85"/>
+<path d="M790,150 C906,150 906,334 790,334" fill="none" stroke="#34d399" stroke-width="1.6" opacity="0.85"/>
+<path d="M790,242 C906,242 906,426 790,426" fill="none" stroke="#34d399" stroke-width="1.6" opacity="0.85"/>
+<path d="M790,150 C944,150 944,426 790,426" fill="none" stroke="#34d399" stroke-width="1.6" opacity="0.85"/>
+<path d="M940,288.0 L999,288.0" stroke="#9aa7b4" stroke-width="2"/><path d="M991,281.0 L1002,288.0 L991,295.0" fill="none" stroke="#9aa7b4" stroke-width="2"/>
+<rect x="1005" y="183.0" width="250" height="210" rx="14" fill="#161b22" stroke="#a78bfa" stroke-width="2"/>
+<text x="1025" y="221.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="19" font-weight="700" fill="#e6edf3">One answer</text>
+<text x="1025" y="255.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="19" font-weight="600" fill="#34d399">Confidence: high</text>
+<text x="1025" y="289.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="19" font-weight="500" fill="#9aa7b4">Where they agreed</text>
+<text x="1025" y="323.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="19" font-weight="600" fill="#fb7185">Unresolved: 1</text>
+<text x="1025" y="357.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="19" font-weight="500" fill="#9aa7b4">Replayable debate</text>
+<line x1="730" y1="580" x2="760" y2="580" stroke="#fb7185" stroke-width="2" stroke-dasharray="5 5"/><text x="768" y="585" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#9aa7b4">dispute</text>
+<line x1="840" y1="580" x2="870" y2="580" stroke="#34d399" stroke-width="2"/><text x="878" y="585" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#9aa7b4">agree</text>
+</svg>

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or idea
+    url: https://github.com/seanheiney/consensus/discussions
+    about: Ask how to do something, share a panel or pack, or float an idea before building it.
+  - name: Install trouble
+    url: https://github.com/seanheiney/consensus/blob/main/docs/install.md#troubleshooting
+    about: The troubleshooting table covers the most common install problems.
+  - name: Security vulnerability
+    url: https://github.com/seanheiney/consensus/security/advisories/new
+    about: Report privately. Please do not open a public issue.
