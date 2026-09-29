@@ -1,4 +1,5 @@
 import { describeIsolation, isolationSummary } from "./providers/isolation.js";
+import { cleanRooms } from "./providers/cleanroom.js";
 import type { ConsensusRun, VerifiedClaim } from "./types.js";
 
 function fmt(n: number): string {
@@ -59,6 +60,9 @@ export function renderReport(run: ConsensusRun, opts: { transcript?: boolean } =
   }
 
   const iso = isolationSummary(run.isolation);
+  // Older runs have no cleanRooms field; derive it from their receipts.
+  const trust = run.cleanRooms ?? cleanRooms(run.isolation);
+  if (trust) lines.push("", `**${trust.line}**`);
   if (iso) {
     lines.push("", `_${iso}_`);
     for (const [id, s] of Object.entries(run.isolation!)) lines.push(`- ${describeIsolation(id, s)}`);

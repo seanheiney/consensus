@@ -161,6 +161,7 @@ describe("Grok CLI seat (fake binary)", () => {
     const bin = join(dir, "grok");
     // Record what the seat could see, then "refresh" the token the way grok would.
     await writeFile(bin, `#!/bin/sh
+[ "$1" = inspect ] && exit 2
 { echo "HOME=$HOME"; echo "GROK_HOME=$GROK_HOME"; ls -A "$GROK_HOME"; cat "$GROK_HOME/auth.json"; echo; } > "${seen}"
 sleep 0.05; printf '{"token":"new"}' > "$GROK_HOME/auth.json"
 echo '{"result":"pong"}'

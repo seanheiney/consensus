@@ -15,6 +15,7 @@ import type {
   Usage,
 } from "../types.js";
 import { foldIsolation } from "../providers/isolation.js";
+import { cleanRooms } from "../providers/cleanroom.js";
 import { runKey } from "../runkey.js";
 import { extractJson } from "./json.js";
 import { CritiqueSchema, ModerationSchema, RevisionSchema, VerificationSchema } from "./schemas.js";
@@ -119,6 +120,7 @@ export class ConsensusEngine {
         for (const [id, u] of Object.entries(this.retiredUsage)) run.usage[id] ??= u;
         const c = estimateCost(run.usage);
         run.cost = { billedUsd: c.usd, subscriptionEquivUsd: c.subscriptionEquivUsd, unpriced: c.unpriced, summary: describeCost(c) };
+        run.cleanRooms = cleanRooms(run.isolation);
         run.finishedAt = new Date().toISOString();
         e.partial = run;
       }
@@ -381,6 +383,7 @@ export class ConsensusEngine {
     if (captain) run.captain = captain.id;
     const c = estimateCost(run.usage);
     run.cost = { billedUsd: c.usd, subscriptionEquivUsd: c.subscriptionEquivUsd, unpriced: c.unpriced, summary: describeCost(c) };
+    run.cleanRooms = cleanRooms(run.isolation);
     run.finishedAt = new Date().toISOString();
     this.emit({ type: "done", run });
     return run;
@@ -485,6 +488,7 @@ export class ConsensusEngine {
       if (this.current) {
         this.current.finalAnswers = this.answers(states);
         for (const s of states) if (s.usage.reported) this.current.usage[s.panelist.id] = { ...s.usage, reported: undefined, billing: s.panelist.billing };
+        this.current.cleanRooms = cleanRooms(this.current.isolation);
         this.current.finishedAt = new Date().toISOString();
         err.partial = this.current;
       }

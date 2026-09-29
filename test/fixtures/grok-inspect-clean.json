@@ -1,0 +1,63 @@
+{
+  "grokVersion": "1.0.41",
+  "channel": "unknown",
+  "cwd": "/tmp/consensus-XXXXXX",
+  "projectRoot": null,
+  "projectTrusted": true,
+  "projectInstructions": [],
+  "hooks": [],
+  "skills": [],
+  "agents": [
+    {
+      "name": "general-purpose",
+      "description": "General purpose agent for multi-step tasks.",
+      "source": {
+        "type": "builtin"
+      }
+    },
+    {
+      "name": "explore",
+      "description": "Fast, read-only agent specialized for codebase exploration.",
+      "source": {
+        "type": "builtin"
+      }
+    },
+    {
+      "name": "plan",
+      "description": "Software architect for planning implementation strategies.",
+      "source": {
+        "type": "builtin"
+      }
+    }
+  ],
+  "plugins": [],
+  "marketplaces": [],
+  "mcpServers": [],
+  "lspServers": [],
+  "configSources": {
+    "layers": []
+  },
+  "externalCompat": {
+    "remoteSettingsLoaded": false,
+    "cells": [
+      {
+        "vendor": "claude",
+        "surface": "skills",
+        "enabled": true,
+        "source": "default"
+      },
+      {
+        "vendor": "claude",
+        "surface": "rules",
+        "enabled": true,
+        "source": "default"
+      },
+      {
+        "vendor": "claude",
+        "surface": "agents",
+        "enabled": true,
+        "source": "default"
+      }
+    ]
+  }
+}

@@ -18,6 +18,7 @@ import { DEFAULT_ADR_DIR, adrSlug, nextAdrNumber, renderAdr } from "./adr.js";
 import { calibrate, collectOutcomes, parseOutcome, recordOutcome, renderCalibration, runProfile } from "./calibration.js";
 import { recheckCommand } from "./drift.js";
 import { describeIsolation, foldIsolation, seatEnv } from "./providers/isolation.js";
+import { isolationChecks, isolationReport } from "./providers/cleanroom.js";
 import { probeSpecs, scanVendors } from "./doctor.js";
 import { installProjectMcp, installProjectSkills, listHosts, mcpLaunchCommand } from "./hosts.js";
 import { describeProfile, editProfile, materializePreset, memberLabel, profileWarnings } from "./profiles.js";
@@ -496,7 +497,16 @@ program
   .description("show which subscriptions / keys are connected and which IDEs are set up")
   .option("--probe", "make one tiny live call through each connected vendor")
   .option("--isolation", "make one tiny live call per subscription seat and show what it could reach (tools, MCP servers, environment); exits 1 if any seat is not clean or could not be checked")
+  .option("--json", "with --isolation: print only the isolation receipts as JSON")
   .action(async (o) => {
+    if (o.json) {
+      if (!o.isolation) throw new Error("--json only applies to --isolation. Run `consensus doctor --isolation --json`.");
+      const specs = (await scanVendors(credentialEnv())).filter((s) => s.connected && s.via === "cli").map((s) => s.spec!);
+      const report = isolationReport(isolationChecks(await probeSpecs(specs, credentialEnv())), notableWithheld());
+      process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+      if (!report.ok) process.exitCode = 1;
+      return;
+    }
     const statuses = await scanVendors(credentialEnv());
     for (const w of configWarnings) log(yellow(`warning: ${w}`));
     log(bold("Accounts"));
@@ -533,7 +543,8 @@ program
       log(bold("\nIsolation (one tiny live call per subscription seat)"));
       if (!specs.length) log(dim("  no subscription seats connected; API seats send no tools and need no check"));
       let dirty = false;
-      for (const r of await probeSpecs(specs, credentialEnv())) {
+      const results = await probeSpecs(specs, credentialEnv());
+      for (const r of results) {
         if (!r.ok || !r.isolation) {
           log(`  ${red(G.err)} ${r.id.padEnd(12)} ${r.error ?? "no isolation receipt returned"}`);
           dirty = true;
@@ -545,6 +556,8 @@ program
         if (s.flags) log(dim(`      flags: ${s.flags.join(" ")}`));
         if (s.apiKeySource) log(dim(`      credentials: ${s.apiKeySource === "none" ? "subscription login" : s.apiKeySource}`));
       }
+      const trust = isolationReport(isolationChecks(results), []).cleanRooms;
+      if (trust) log(`  ${trust.line}  ${dim("(docs/isolation.md explains observed vs configured-only)")}`);
       const withheld = Object.keys(seatEnv("claude").env).length < Object.keys(process.env).length ? notableWithheld() : [];
       if (withheld.length) log(dim(`  withheld from every seat, e.g.: ${withheld.join(", ")}  (names only; CONSENSUS_SEAT_ENV passes extras)`));
       if (dirty) process.exitCode = 1;
