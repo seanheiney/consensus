@@ -15,6 +15,7 @@ import { TASKS, taskNames } from "./variants.js";
 import { runWithEscalation } from "./escalate.js";
 import { runKey } from "./runkey.js";
 import { DEFAULT_ADR_DIR, adrSlug, nextAdrNumber, renderAdr } from "./adr.js";
+import { recheckCommand } from "./drift.js";
 import { describeIsolation, foldIsolation, seatEnv } from "./providers/isolation.js";
 import { probeSpecs, scanVendors } from "./doctor.js";
 import { installProjectMcp, installProjectSkills, listHosts, mcpLaunchCommand } from "./hosts.js";
@@ -241,7 +242,11 @@ program
         onEvent,
         signal: ac.signal,
       });
-      return engine.run(p, c);
+      const done = await engine.run(p, c);
+      // Recorded so `consensus adr --recheck` can seat the same profile and re-read the context later.
+      if (resolved.profile) done.profile = resolved.profile;
+      if (o.context) done.contextFile = String(o.context);
+      return done;
     };
     let run: import("./types.js").ConsensusRun;
     try {
@@ -308,7 +313,19 @@ program
   .option("-d, --dir <path>", `directory for decision records (default ${DEFAULT_ADR_DIR})`)
   .option("-s, --status <status>", "status line: Proposed, Accepted, Superseded... (default Proposed)")
   .option("--stdout", "print the record instead of writing a file")
+  .option("--recheck [paths...]", "re-ask the question of each named record (or --all) and append a dated verdict: unchanged, refined or changed; exit 1 if any changed")
+  .option("--all", "with --recheck: every record in --dir")
+  .option("-P, --profile <name>", "with --recheck: use this profile instead of the recorded panel")
+  .option("--dry-run", "with --recheck: list what would be rechecked and with which panel; no model calls")
+  .option("--max-cost <usd>", "with --recheck: abort a recheck once spend billed to API keys exceeds this", (v: string) => { const n = Number(v); if (!(n > 0)) throw new InvalidArgumentError("must be a positive number"); return n; })
+  .option("--json", "with --recheck: print the results as JSON")
   .action(async (id: string | undefined, o) => {
+    if (o.recheck) {
+      const paths = [...(id ? [id] : []), ...(Array.isArray(o.recheck) ? (o.recheck as string[]) : [])];
+      process.exitCode = await recheckCommand({ paths, all: o.all, dir: o.dir ?? DEFAULT_ADR_DIR, profile: o.profile, dryRun: o.dryRun, json: o.json, maxCost: o.maxCost });
+      return;
+    }
+    if (o.all || o.profile || o.dryRun || o.json || o.maxCost) throw new Error("--all, --profile, --dry-run, --max-cost and --json only apply with --recheck.");
     const cfg = await loadConfig();
     const { run, dir: runDir } = await loadRun(id, cfg.runsDir);
     const dir = o.dir ?? DEFAULT_ADR_DIR;
