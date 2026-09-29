@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format follows [Kee
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-28
+
+The trust release: cheap disagreement checks, quarantine for untrusted content, calibration, decision drift rechecks and observed clean rooms, plus Groq panels and a GitHub Action. First release on npm (`npm install -g consensus-panel`); 0.2.0 was published there on the same day to claim the name.
+
 ### Added
 - `--variants <n>` / MCP `variants`: seat the panel's model(s) once per reasoning angle, so one subscription can hold a real debate. `--for <task>` (code-review, architecture, debug, security, product, estimate) seats the angles that suit a kind of work and its round count. New personas: `enumerator`, `alternate-method`.
 - `--escalate <profile>` / MCP `escalate_to`: answer with the chosen panel first and promote to a stronger profile only when the first pass is unsettled (not converged, a major dispute open, confidence below high, or seats lost). `--escalate-when unsettled|disputed|always`. Opt-in, never downgrades a run; the promoted panel receives the first answer as a draft to verify and the run records where it came from.

@@ -33,7 +33,7 @@
 # shellcheck disable=SC2016,SC2088,SC1091,SC2015,SC2012
 set -eu
 
-INSTALLER_VERSION="0.2.0"
+INSTALLER_VERSION="0.3.0"
 REPO_URL="https://github.com/seanheiney/consensus"
 PKG="consensus-panel"
 

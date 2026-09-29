@@ -5,7 +5,7 @@
 # `irm | iex` cannot pass parameters. Use environment variables, or the scriptblock form:
 #
 #   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/seanheiney/consensus/main/install.ps1))) -Yes
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/seanheiney/consensus/main/install.ps1))) -Version 0.2.0 -NoSetup
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/seanheiney/consensus/main/install.ps1))) -Version 0.3.0 -NoSetup
 #   $env:CONSENSUS_YES = 1; irm https://raw.githubusercontent.com/seanheiney/consensus/main/install.ps1 | iex
 #
 # What it does, in order:
@@ -37,7 +37,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"   # Invoke-WebRequest's progress bar makes 5.1 downloads crawl
-$installerVer = "0.2.0"
+$installerVer = "0.3.0"
 $repoUrl = "https://github.com/seanheiney/consensus"
 $pkg = "consensus-panel"
 
@@ -62,7 +62,7 @@ Options:
   -InstallerVersion print the installer version and exit
 
 Environment (for irm | iex, which cannot pass options):
-  CONSENSUS_YES=1  CONSENSUS_NO_SETUP=1  CONSENSUS_NO_FIRST_RUN=1  CONSENSUS_VERSION=0.2.0
+  CONSENSUS_YES=1  CONSENSUS_NO_SETUP=1  CONSENSUS_NO_FIRST_RUN=1  CONSENSUS_VERSION=0.3.0
   CONSENSUS_INSTALL_DIR=<root>  CONSENSUS_NO_MODIFY_PATH=1
   CONSENSUS_DOWNLOAD_BASE=<url>   mirror: <url>/SHA256SUMS and <url>/consensus-win-<arch>.zip
   CONSENSUS_NODE_DIST=<url>       Node mirror for the fallback (default https://nodejs.org/dist)

@@ -12,6 +12,7 @@ Start at the [project README](../README.md) for what consensus is and the 90-sec
 | [quarantine.md](quarantine.md) | Reviewing untrusted plugins, skills, READMEs or PRs with `--untrusted`: nonce delimiters, the canary, how injection findings are merged, the `plugin-review` pack and demo, and the honest limits. |
 | [decisions.md](decisions.md) | `consensus adr` records and `--recheck` drift checks: verdicts, how the panel and context are chosen, exit codes, and a monthly GitHub Actions workflow. |
 | [isolation.md](isolation.md) | Clean rooms: what each seat can and cannot see, evidence levels per vendor, the run trust line, `doctor --isolation --json`, and known gaps. |
+| [evidence.md](evidence.md) | Does the panel beat one model? Ablations against single models and self-consistency, with raw results and caveats. |
 | [faq.md](faq.md) | Does it actually help, what it costs, subscriptions and vendor terms, what the clean room blocks, privacy, dropped seats, `agree` with disputes, `--rounds 1`, bringing your own model, sharing panels, CI, and whether there is an API. |
 | [../PACKS.md](../PACKS.md) | Packs: bundling profiles, personas and a bench suite into one shareable JSON file, and publishing yours. |
 
@@ -22,6 +23,7 @@ Start at the [project README](../README.md) for what consensus is and the 90-sec
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Dev setup with pnpm, running tests, adding a provider / persona / pack / host, and what a PR needs. |
 | [../SECURITY.md](../SECURITY.md) | How to report a vulnerability, what the tool does and does not send anywhere, and credential file handling. |
 | [../CHANGELOG.md](../CHANGELOG.md) | Releases. |
+| [../CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md) | How we treat each other in issues, PRs and discussions. |
 
 ## Reference
 

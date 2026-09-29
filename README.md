@@ -1,173 +1,174 @@
-# consensus
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.svg">
+    <img alt="consensus: a panel of frontier models argues until it agrees, and tells you what it still could not settle" src="docs/assets/hero-light.svg" width="900">
+  </picture>
+</p>
 
-Throw a hard problem at a panel of frontier models. They answer independently, attack each other's answers, concede or rebut, revise, and repeat until they agree — and you get one answer the whole panel signed off on, with the disagreements that survived laid out honestly.
+<p align="center">
+  <a href="https://www.npmjs.com/package/consensus-panel"><img alt="npm" src="https://img.shields.io/npm/v/consensus-panel?color=7c3aed&label=npm"></a>
+  <a href="https://github.com/seanheiney/consensus/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/seanheiney/consensus/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-0ea5e9"></a>
+  <img alt="Node 22+" src="https://img.shields.io/badge/node-22%2B-059669">
+  <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-a78bfa">
+</p>
 
-It runs on the **AI subscriptions you already pay for** (Claude Pro/Max, ChatGPT Plus/Pro, SuperGrok) as well as API keys or OpenRouter, by driving each vendor's own CLI headless in a clean room.
-*Subscription seats spend the same rate limits as your interactive use of those CLIs, and vendors' terms govern that use — Anthropic's terms restrict third-party products from relying on claude.ai logins. [Read this before you rely on it.](docs/faq.md#does-it-use-my-subscription-and-am-i-allowed-to-do-that)*
-
-```
-# illustrative transcript: a 3-round debate that revises once and converges
-$ consensus "Optimistic locking or a distributed lock for inventory holds?"
-
-panel (balanced): claude:claude-opus-5#high, codex:gpt-5.6-sol#high, grok:grok-4.5#high, gemini:gemini-3.8-flash#high
-judge: claude:claude-opus-5  rounds: 3  cost: subscription quota; roughly 28 model calls at most
-debate log: .consensus/runs/20260916T094012Z-a1b2c3/debate.md  (tail -f to watch)
-▶ propose
-  ✓ A claude:claude-opus-5   41.2s
-  ✓ B codex:gpt-5.6-sol      38.7s
-  ...
-▶ critique (round 1)
-  4 disputes open after round 1
-▶ revise (round 1)
-▶ critique (round 2)
-  panel converged in round 2
-▶ synthesize
-```
-
-You get back: the answer, a confidence level, what the panel agreed on, what it could not settle, and what changed during review. Every run is saved and replayable.
+<p align="center">
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#what-you-get-back">What you get back</a> ·
+  <a href="#does-it-actually-help">Evidence</a> ·
+  <a href="#use-it-from-your-agent">Agents &amp; MCP</a> ·
+  <a href="#in-ci">GitHub Action</a> ·
+  <a href="docs/README.md">Docs</a>
+</p>
 
 ---
 
-## Quickstart (90 seconds)
+One model gives you one confident answer. **consensus** puts the question to a panel instead: Claude, GPT, Grok and Gemini answer independently, attack each other's answers anonymously, concede or rebut every dispute, and revise until they agree. You get **one answer the whole panel signed off on**, its confidence, and the disagreements that survived, laid out honestly instead of averaged away.
+
+It runs on the **subscriptions you already pay for** (Claude Pro/Max, ChatGPT Plus/Pro, SuperGrok) by driving each vendor's own CLI in a verified clean room, or on API keys, OpenRouter, Groq, Ollama or any OpenAI-compatible endpoint. CLI, MCP server, GitHub Action and TypeScript library.
+
+## Quickstart
 
 ```bash
-# 1. install: one download (no Node, npm or sudo needed), then the setup wizard
-curl -fsSL https://raw.githubusercontent.com/seanheiney/consensus/main/install.sh | sh
-
-# 2. setup connects your accounts, builds profiles, teaches your IDEs, and runs
-#    a first debate so you see a real result. Then ask it something:
-consensus "Should we move this queue from Postgres SKIP LOCKED to Redis/BullMQ?" -c src/queue.ts
-
-# 3. read it again later
-consensus runs          # list past debates
-consensus log           # replay the latest in full
-consensus log --html    # one self-contained page you can send to someone
+npm install -g consensus-panel      # or the one-liner below: no Node needed
+consensus setup                     # finds your accounts, builds panels, teaches your IDEs, runs a first debate
+consensus "Should this queue move from Postgres SKIP LOCKED to Redis/BullMQ?" -c src/queue.ts
 ```
-
-Not connected to anything yet? `consensus doctor` says what is missing and how to fix it. You need **at least two seats** for a panel; one OpenRouter key (`OPENROUTER_API_KEY`) is enough to reach every vendor at once.
-
-Want a panel shaped for your problem? Describe it and a model drafts the seats and personas:
 
 ```bash
-consensus profile design "4 panelists: security, distributed systems, a PM, a skeptic; frontier models; 2 rounds"
-consensus "…" --profile <the name it chose>
+curl -fsSL https://raw.githubusercontent.com/seanheiney/consensus/main/install.sh | sh          # macOS / Linux
+irm https://raw.githubusercontent.com/seanheiney/consensus/main/install.ps1 | iex               # Windows
 ```
 
-## Install
+You need two model connections for a panel, or one with `--variants 4` (the same model seated under four reasoning angles). `consensus doctor` tells you what is connected and what is missing. One `OPENROUTER_API_KEY` reaches every vendor.
 
-| Platform | Command |
-|---|---|
-| macOS / Linux | `curl -fsSL https://raw.githubusercontent.com/seanheiney/consensus/main/install.sh \| sh` |
-| macOS / Linux, unattended | `curl -fsSL https://raw.githubusercontent.com/seanheiney/consensus/main/install.sh \| sh -s -- --yes` |
-| Windows (PowerShell) | `irm https://raw.githubusercontent.com/seanheiney/consensus/main/install.ps1 \| iex` |
-| npm (you manage Node 22+) | `npm install -g https://github.com/seanheiney/consensus/archive/refs/heads/main.tar.gz && consensus setup` (`consensus-panel` on npm once published) |
-| From source | `git clone https://github.com/seanheiney/consensus && cd consensus && pnpm install && pnpm build && npm link` |
+## What you get back
 
-The one-liners need **no Node, no npm and no sudo**: they download a self-contained build (the official Node 22 runtime plus the bundled CLI, about 38 MB), verify it against the release's `SHA256SUMS`, install it under `~/.consensus` with a `~/.local/bin/consensus` link, add one marked line to your shell rc files, and start `consensus setup` in the same terminal. Re-running upgrades in place (and runs `consensus doctor` instead of the wizard). Your own Node, if any, is never used or changed. No telemetry. Later: `consensus update`, `consensus uninstall --all`.
+A real run, lightly trimmed: Claude Haiku 4.5 seated three times under the `debug` angles, GPT-5.6 Sol as captain, and a `--verify` grounding pass over the result.
 
-You need at least two model connections for a panel. Installer options: `--help`, `--yes`, `--no-setup`, `--version <x.y.z>`, `--no-modify-path`, `--dir`, and `CONSENSUS_*` environment equivalents.
+```text
+$ consensus "A payment service retries a failed charge 3 times with no idempotency key.
+             Name the concrete failure this causes." \
+    -p claude:claude-haiku-4-5-20251001 --for debug -e low --verify
 
-Full details — what the installer writes where, verifying releases, proxies, air-gapped installs, upgrading, uninstalling, and a troubleshooting table: **[docs/install.md](docs/install.md)**.
+# Answer
+The concrete failure is duplicate charges: the customer may be charged multiple times for one transaction.
+This occurs when the original charge succeeds at the processor but its response is lost or times out. […]
 
-## What `consensus setup` does
+# Confidence
+High — all provided answers agree.
 
-1. **Finds your accounts.** Vendor CLIs you already use (Claude Code, Codex, Gemini CLI, Grok) and whether they are logged in, plus any API keys. For anything missing it offers to log you in through the vendor's own CLI, install that CLI, or store an API key in `~/.config/consensus/credentials.json` (mode 600). Your subscription auth stays inside the vendor's CLI; consensus never sees a token.
-2. **Builds model profiles** from what is connected, and asks which is the default.
-3. **Teaches your tools.** Registers the MCP server and drops a skill pack into Claude Code, Codex, Gemini CLI, Grok, Cursor, Windsurf, Claude Desktop, and the cross-tool `~/.agents/skills` directory. Your agent then knows the panel exists and when to reach for it.
-4. **Runs a first debate** so you see a real result and where the log lives.
+# Unresolved disagreements
+- None.
 
-`consensus setup --yes` does all of it with no questions. `consensus doctor --probe` shows what is connected and makes one tiny call through each to prove it. `consensus uninstall [--all] [--purge]` reverses every change.
+Grounding check by codex:gpt-5.6-sol: 4 load-bearing claims checked against the material given
+  — 1 supported, 0 contradicted, 3 not established by that material.
+  - unsupported: the charge succeeding while its response is lost — the problem never says any attempt succeeded.
+  - unsupported: "up to four identical charges" — nothing establishes that every attempt can create a charge.
 
-## How your subscriptions are used
+Dropped: the enumerator seat hit its weekly usage limit in round 1; the other two carried on.
+Isolation: 4/4 seats clean (3 observed at startup with no tools or MCP servers; 1 by lockdown flags)
+Panel converged after 1 round. Cost: subscription quota (~$0.32 list-price equivalent).
+```
 
-| Vendor | Subscription path | API key path |
-|---|---|---|
-| Anthropic | `claude` (Claude Code) logged in with Claude Pro/Max | `ANTHROPIC_API_KEY` |
-| OpenAI | `codex` logged in with ChatGPT Plus/Pro | `OPENAI_API_KEY` |
-| xAI | `grok` CLI logged in | `XAI_API_KEY` |
-| Google | Google retired the free individual Gemini CLI login | `GEMINI_API_KEY` |
-| OpenRouter | — | `OPENROUTER_API_KEY` (covers any vendor you have not connected) |
+The panel agreed, and the grounding check still separated what the question established from what the panel assumed. That separation is the point. Every run is saved, and `consensus log` replays the full debate: each answer, every dispute, every concession and rebuttal.
 
-A subscription-backed seat is that vendor's CLI run headless in an empty temp directory as a clean room: Claude Code with no tools, no settings sources, `--safe-mode` and no MCP servers; Codex with `--ignore-user-config`, `--ignore-rules`, a read-only sandbox and its shell/browser/computer-use/app tools disabled; Gemini in plan mode. Panelists see only the prompt you give them — not your files, CLAUDE.md, AGENTS.md, your other MCP servers, or your shell's other keys (each seat gets an allow-listed environment). Every run records per-seat isolation receipts, and `consensus doctor --isolation` shows them live.
+## How it works
 
-**Read this before relying on subscription seats.** Every seat call spends the same rate limits as your interactive use of that CLI (Claude Code's rolling 5-hour and weekly caps, Codex's ChatGPT limits), and a three-round frontier debate can consume a meaningful slice of a daily cap. Vendors' terms govern this use: Anthropic's published terms restrict third-party products from offering or relying on claude.ai logins without approval. consensus is a local tool you run on your own machine under your own login, not a hosted service, but checking your plan's terms is your responsibility — and you should use API keys for anything shared, automated, or run on someone else's behalf. Keys saved by `setup` are handed only to the matching API client and are never exported into a vendor CLI's environment, so a saved key cannot silently move your subscription CLI onto per-token billing.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/protocol-dark.svg">
+  <img alt="Propose, critique, revise, repeat while any seat disputes, then synthesize" src="docs/assets/protocol-light.svg" width="900">
+</picture>
 
-## Cheap by choice, expensive only when it earns it
+- **Anonymous.** Answers are shown as A, B, C (shuffled once per run), so no seat defers to a brand.
+- **Concede or rebut.** Every dispute gets an answer with a reason. A critique cannot be ignored.
+- **Unanimous or it keeps going.** One dissenting seat keeps the debate open, up to `--rounds`. A captain (by default the best model available) moderates, referees disputes it can settle, and ends a stalemate by reporting it.
+- **Honest output.** The report keeps unresolved disagreements, with each side's strongest case, and says what changed during review. A seat that fails is dropped and the run continues, with exit code 2 so scripts notice.
 
-None of this is on by default. A run is exactly the panel you asked for, and these are flags you add.
+## Does it actually help?
+
+Measured, not asserted: [docs/evidence.md](docs/evidence.md). On eight open design and operations decisions with expert-written rubrics, blind graders from two vendors preferred the debated answer over either single frontier model on **7–8 of 9 paired cases**, and scored it highest on rubric accuracy. Against the same model sampled three times and self-merged, one grader preferred the panel 7–1–1 and the other called it even.
+
+It is not free: a full frontier debate took about **22× the time** of one answer. On easy questions a single model is already right, and the panel mostly adds polish. So use a panel where being wrong is expensive, and use the cheap tools below everywhere else. `consensus bench` runs the same comparison on your own questions.
+
+## Cheap by default, expensive when it earns it
 
 ```bash
-consensus "Optimistic locking or a distributed lock?" --variants 4     # one model, four angles
-consensus "Review this migration" -c plan.sql --for code-review        # the angles that fit the work
-consensus "Is this design sound?" -P groq-fast --escalate frontier     # cheap first, promote only if unsettled
-consensus "Does this schema support our queries?" -c schema.sql --verify   # check claims against what you pasted
-consensus adr                                                          # write the decision into docs/decisions/
+consensus check "Is this migration safe to run online?" -c 0042.sql     # one answer per model, no debate; exit 1 when they split
+consensus "Is this design sound?" -P groq-fast --escalate frontier     # open-weight panel in seconds; promote only if unsettled
+consensus "Review this migration" -c plan.sql --for code-review        # the reasoning angles that fit the work
+consensus "Optimistic locking or a distributed lock?" --variants 4     # a real debate on a single subscription
 ```
 
-- **`--variants` / `--for`** seat the same model several times under different reasoning angles, so a real debate needs one subscription rather than four. With `groq-fast` (Groq's open-weight models, once `GROQ_API_KEY` is set) that is seconds and fractions of a cent.
-- **`--escalate <profile>`** answers with the cheap panel and promotes to the strong one only when the first pass did not converge, left a major dispute open, or reported confidence below high. It never downgrades a run, and the promoted panel gets the first answer as a draft to check.
-- **`--verify`** separates what your pasted material actually establishes from what the panel assumed.
-- **`--reuse`** hands back the saved answer when the same question already went to the same panel.
-- **`consensus adr`** writes the decision, its confidence, its dissents and how to replay the debate into your repo. In CI, the [GitHub Action](docs/ci.md) puts the same thing on a pull request.
+- **`consensus check`** uses disagreement between models as an uncertainty detector: one call per seat, then `Needs human: yes|no` to gate an agent or a CI job on.
+- **`--escalate`** answers with the cheap panel and promotes to the strong one only when the first pass did not converge, left a major dispute open, or reported confidence below high.
+- **`groq-fast` / `groq-council`** seat Groq's open-weight models under different angles once `GROQ_API_KEY` is set. A debate then takes seconds and costs a fraction of a cent.
 
 ## Trust you can check
 
-```bash
-consensus check "Is this migration safe to run online?" -c 0042.sql   # one answer per model, no debate; exit 1 when they split
-consensus -P plugin-review --untrusted SKILL.md "Is this plugin safe to install?"   # read it as data, list injection attempts
-consensus outcome latest right          # later: record how the decision turned out
-consensus calibration                   # does "high confidence" actually mean right more often?
-consensus adr --recheck --all           # re-ask recorded decisions with today's models; exit 1 if one changed
-```
+| Feature | What it does |
+|---|---|
+| **Grounding** | `--verify` marks each load-bearing claim in the report supported, contradicted or unsupported by the material you supplied. |
+| **Quarantine** | `--untrusted SKILL.md` reads third-party plugins, skills, READMEs or PRs as data inside per-run delimiters with a canary token. Seats report injection attempts, and a seat that leaks the canary is excluded. Try the `plugin-review` pack on the [harmless demo plugin](examples/injection-demo/): [docs/quarantine.md](docs/quarantine.md). |
+| **Clean rooms, observed** | Seats see only your prompt: no files, no instruction files, no MCP servers, no other vendors' keys. Every run ends with a line such as `Clean rooms: 3/3 seats observed clean` that separates isolation the CLI reported from isolation that is only configured. [docs/isolation.md](docs/isolation.md) |
+| **Calibration** | `consensus outcome latest right` records how a decision turned out, and `consensus calibration` shows whether "high confidence" actually meant right more often, or says there is too little data to tell. |
+| **Decision records** | `consensus adr` writes the decision, confidence, dissent and a replay command to `docs/decisions/`. `consensus adr --recheck --all` re-asks them with today's models and exits 1 if one changed. [docs/decisions.md](docs/decisions.md) |
 
-- **`consensus check`** uses disagreement between models as an uncertainty signal: seconds, one call per seat, and a `Needs human: yes|no` you can gate CI or an agent on.
-- **Quarantine (`--untrusted`)** puts third-party plugins, skills, READMEs or PRs inside per-run delimiters with a canary token. Seats report the injection attempts they find, and any seat that leaks the canary is excluded ([docs/quarantine.md](docs/quarantine.md); `plugin-review` pack via `consensus pack add ./packs/plugin-review.json`).
-- **Calibration**: `consensus outcome` and `consensus calibration` score the panel's stated confidence against what actually happened, and say when there is too little data to tell.
-- **Decision drift**: `consensus adr --recheck` appends a dated verdict (unchanged, refined, changed) to each record without touching the original ([docs/decisions.md](docs/decisions.md)).
-- **Clean rooms, observed**: every run ends with a trust line such as `Clean rooms: 3/3 seats observed clean`, separating isolation the CLI reported from isolation that is only configured ([docs/isolation.md](docs/isolation.md)).
+## Use it from your agent
 
-## Use it from Claude Code, Codex, Cursor…
-
-After `setup`, your agent has a `consensus` MCP tool plus a skill telling it when to use it. Just ask: *"Get a panel consensus on whether we should migrate this queue to Kafka; include the producer code."*
+`consensus setup` registers the MCP server and a skill in Claude Code, Codex, Gemini CLI, Grok, Cursor, Windsurf and Claude Desktop, so your agent knows when to reach for a panel. Then just ask: *"Get a panel consensus on whether we should move this queue to Kafka; include the producer code."*
 
 ```bash
-claude mcp add -s user consensus -- consensus mcp      # manual registration, if you prefer
+claude mcp add -s user consensus -- consensus mcp      # or register it by hand
 codex mcp add consensus -- consensus mcp
-gemini mcp add -s user consensus consensus mcp
-grok mcp add consensus consensus -- mcp
 ```
 
-Cursor, Windsurf, and Claude Desktop take `{"command": "consensus", "args": ["mcp"]}` under `mcpServers`. The server exposes `consensus` (run a panel) and `consensus_profiles` (list profiles and connections). See [docs/usage.md](docs/usage.md#mcp-server).
+Tools: `consensus` (run a panel, with `variants`, `escalate_to`, `verify`, `untrusted`), `consensus_check`, `consensus_outcome`, `consensus_profiles`, `consensus_design`. Details in [docs/usage.md](docs/usage.md#mcp-server).
 
-## How the protocol works
+## In CI
 
-1. **Propose.** Every panelist answers independently and in parallel. No anchoring.
-2. **Critique.** Each panelist sees all answers, anonymized as Answer A, B, C (labels shuffled once per run; a panelist knows only which is its own). It must attack every other answer with specific, falsifiable disputes, review its own, and return a verdict per answer: *agree* (substantively equivalent, no major error) or *disagree*.
-3. **Converged?** Only when every panelist marks every other answer *agree* with no major dispute. One dissenter keeps the debate going.
-4. **Revise.** Each panelist gets every dispute raised against it and must **concede** or **rebut** each one with a reason, then rewrite its answer.
-5. Repeat critique → revise up to `--rounds` times.
-6. **Synthesize.** The judge writes the unified answer with a fixed structure: the answer, confidence, where the panel agreed, unresolved disagreements with each side's strongest case, and what changed during review.
+```yaml
+- uses: seanheiney/consensus@v0.3.0
+  with:
+    prompt: Review this diff for correctness, security and operational risk.
+    context-file: /tmp/diff.patch
+    profile: groq-fast
+    for: code-review
+    verify: "true"
+    comment: "true"          # post the report on the pull request
+    max-cost: "0.50"
+  env:
+    GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+```
 
-Design choices: panelists are anonymous so no one defers to a brand; concede-or-rebut is mandatory so critiques cannot be ignored; disagreement is reported rather than hidden; a panelist that errors out is dropped and the run continues while two remain (and the run exits 2 so a script notices); every model gets identical prompts.
+`mode: check` gives a cheap gate that debates only on a split. Other recipes cover escalation, `/consensus` comments and monthly decision rechecks: [docs/ci.md](docs/ci.md).
 
-With `--rounds 1` the panel critiques but never revises — see [why](docs/faq.md#why-was-there-no-revision-with---rounds-1).
+## Your subscriptions, and the fine print
 
-## Cost and time
+| Vendor | Subscription seat | API key |
+|---|---|---|
+| Anthropic | `claude` (Claude Code) on Claude Pro/Max | `ANTHROPIC_API_KEY` |
+| OpenAI | `codex` on ChatGPT Plus/Pro | `OPENAI_API_KEY` |
+| xAI | `grok` CLI | `XAI_API_KEY` |
+| Google | — (the free individual Gemini CLI login was retired) | `GEMINI_API_KEY` |
+| Anything else | — | `OPENROUTER_API_KEY`, `GROQ_API_KEY`, Ollama, `compat:<model>@<baseURL>` |
 
-A 3-model, 3-round run is roughly 20 model calls, each carrying the full set of answers. On subscriptions that is quota; on API keys, expect a few dollars at frontier tier. Every run prints the seats and effort it will use **before** starting and the estimated list-price cost **after**; `--max-cost 2` aborts mid-run if the estimate crosses a ceiling. A bare single word is refused as a prompt so a typo cannot start a paid run. Use the `budget` or `fast` profile for cheap passes.
+A subscription seat is the vendor's own CLI, run headless in an empty directory with its tools, plugins and MCP servers switched off and an allow-listed environment. Consensus never sees your subscription token.
 
-No benchmark claims are made here: `consensus bench` is the tool for producing them on your own problems, and the ablation against single-model baselines has not been run yet.
+**Read this before relying on subscription seats.** They spend the same rate limits as your interactive use of those CLIs, and a three-round frontier debate can take a real slice of a daily cap. The vendors' terms govern this use, and Anthropic's restrict third-party products from relying on claude.ai logins. Consensus is a local tool you run under your own login, not a hosted service. Checking your plan's terms is on you, and anything shared or automated should use API keys. [More in the FAQ.](docs/faq.md#does-it-use-my-subscription-and-am-i-allowed-to-do-that)
 
 ## Documentation
 
-| | |
+| Guide | What is in it |
 |---|---|
-| [docs/install.md](docs/install.md) | Every install path, what the installer writes, upgrading, uninstalling, troubleshooting |
-| [docs/usage.md](docs/usage.md) | CLI reference by task, the `provider[:model][#effort][+persona]` grammar, the model-id spelling rule |
-| [docs/faq.md](docs/faq.md) | Does it actually help, what it costs, subscriptions and terms, privacy, CI, API |
-| [PACKS.md](PACKS.md) | Sharing a panel as one JSON file |
-| [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [CHANGELOG.md](CHANGELOG.md) | Development, reporting issues, releases |
-| [docs/qa/](docs/qa/) | The expert UX-validation runs behind the current design |
+| [Install](docs/install.md) | Every install path, what the installer writes where, upgrading, uninstalling, troubleshooting |
+| [Usage](docs/usage.md) | CLI reference by task, the `provider[:model][#effort][+persona]` seat grammar, profiles, personas, packs, bench, MCP, library |
+| [CI](docs/ci.md) | The GitHub Action: PR review, the `check` gate, escalation, comment commands |
+| [Evidence](docs/evidence.md) | Ablations against single models and self-consistency, with raw results |
+| [Quarantine](docs/quarantine.md) · [Clean rooms](docs/isolation.md) · [Decisions](docs/decisions.md) | The trust features in depth |
+| [FAQ](docs/faq.md) | Cost, terms, privacy, dropped seats, "why no revision with `--rounds 1`" |
+| [Packs](PACKS.md) | Share a panel (profiles, personas, a bench suite) as one JSON file |
 
 ## Library
 
@@ -180,15 +181,15 @@ const run = await runConsensus("Design a rate limiter for a multi-tenant API", {
 console.log(renderReport(run));
 ```
 
-Bring your own model by implementing `Panelist` (`id`, `provider`, `model`, `complete(request)`). See [docs/usage.md](docs/usage.md#library).
+Bring your own model by implementing `Panelist` (`id`, `provider`, `model`, `complete(request)`).
 
-## Development
+## Contributing
 
 ```bash
-pnpm install
-pnpm test          # protocol, profiles, packs, installer tests; no keys needed
-pnpm dev "..."     # run from source
-pnpm build && npm link   # `consensus` on PATH from this checkout
+pnpm install && pnpm test     # 268 tests, no keys needed
+pnpm dev "..."                # run from source
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). MIT licensed.
+Issues and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). Security reports go through [SECURITY.md](SECURITY.md). Release notes are in [CHANGELOG.md](CHANGELOG.md).
+
+MIT licensed. No telemetry.

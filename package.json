@@ -1,7 +1,7 @@
 {
   "name": "consensus-panel",
-  "version": "0.2.0",
-  "description": "Throw a problem at a panel of frontier models, let them debate adversarially, and get one consensus answer. CLI, MCP server, and library.",
+  "version": "0.3.0",
+  "description": "A panel of frontier models debates your hardest question until it agrees, and reports what it could not settle. Runs on the subscriptions you already have. CLI, MCP server, GitHub Action, library.",
   "license": "MIT",
   "type": "module",
   "bin": {
@@ -52,7 +52,12 @@
     "openai",
     "grok",
     "gemini",
-    "agentic"
+    "agentic",
+    "github-action",
+    "prompt-injection",
+    "llm-evaluation",
+    "groq",
+    "ai-agents"
   ],
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="250" viewBox="0 0 1100 250" role="img" aria-label="Protocol: propose, critique, revise, repeat until converged, synthesize">
+<rect width="1100" height="250" rx="16" fill="#0d1117"/>
+<rect x="30" y="40" width="220" height="110" rx="12" fill="#161b22" stroke="#a78bfa" stroke-width="2"/>
+<text x="48" y="76" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20" font-weight="700" fill="#e6edf3">1  Propose</text>
+<text x="48" y="106" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#9aa7b4">every seat answers</text>
+<text x="48" y="128" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#9aa7b4">independently, in parallel</text>
+<path d="M256,95.0 L292,95.0" stroke="#9aa7b4" stroke-width="2"/><path d="M285,89.0 L294,95.0 L285,101.0" fill="none" stroke="#9aa7b4" stroke-width="2"/>
+<rect x="300" y="40" width="220" height="110" rx="12" fill="#161b22" stroke="#38bdf8" stroke-width="2"/>
+<text x="318" y="76" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20" font-weight="700" fill="#e6edf3">2  Critique</text>
+<text x="318" y="106" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#9aa7b4">anonymized answers A, B, C</text>
+<text x="318" y="128" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#9aa7b4">falsifiable disputes, verdicts</text>
+<path d="M526,95.0 L562,95.0" stroke="#9aa7b4" stroke-width="2"/><path d="M555,89.0 L564,95.0 L555,101.0" fill="none" stroke="#9aa7b4" stroke-width="2"/>
+<rect x="570" y="40" width="220" height="110" rx="12" fill="#161b22" stroke="#38bdf8" stroke-width="2"/>
+<text x="588" y="76" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20" font-weight="700" fill="#e6edf3">3  Revise</text>
+<text x="588" y="106" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#9aa7b4">concede or rebut</text>
+<text x="588" y="128" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#9aa7b4">every dispute, then rewrite</text>
+<path d="M796,95.0 L832,95.0" stroke="#9aa7b4" stroke-width="2"/><path d="M825,89.0 L834,95.0 L825,101.0" fill="none" stroke="#9aa7b4" stroke-width="2"/>
+<rect x="840" y="40" width="220" height="110" rx="12" fill="#161b22" stroke="#a78bfa" stroke-width="2"/>
+<text x="858" y="76" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="20" font-weight="700" fill="#e6edf3">4  Synthesize</text>
+<text x="858" y="106" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#9aa7b4">one answer, confidence,</text>
+<text x="858" y="128" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#9aa7b4">dissent, what changed</text>
+<path d="M680.0,154 C680.0,212 410.0,212 410.0,160" fill="none" stroke="#fb7185" stroke-width="2" stroke-dasharray="6 5"/><path d="M404.0,168 L410.0,156 L416.0,168" fill="none" stroke="#fb7185" stroke-width="2"/>
+<text x="545.0" y="226" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" fill="#9aa7b4">repeat while any seat still disputes an answer (up to --rounds); a captain moderates and can end a stalemate</text>
+</svg>

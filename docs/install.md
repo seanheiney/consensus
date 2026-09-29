@@ -107,12 +107,11 @@ If PowerShell refuses to run a downloaded copy, either unblock it (`Unblock-File
 ### npm (you already have Node 22+)
 
 ```bash
-npm install -g consensus-panel      # once published; until then:
-npm install -g https://github.com/seanheiney/consensus/archive/refs/heads/main.tar.gz
+npm install -g consensus-panel
 consensus setup
 ```
 
-The npm channel ships the same code. `consensus update` on an npm install prints the npm command instead of re-running the installer.
+The npm channel ships the same code as the release archives, and every release is published from CI. For unreleased changes on `main`, install the repo tarball instead: `npm install -g https://github.com/seanheiney/consensus/archive/refs/heads/main.tar.gz`. `consensus update` on an npm install prints the npm command instead of re-running the installer.
 
 ### From source
 
@@ -153,7 +152,7 @@ Then the hand-off:
 - **`--yes`**: `consensus setup --yes`.
 - **No terminal** (docker without `-t`, CI, `ssh host 'curl … | sh'`): prints exactly how to finish (`consensus setup` or `consensus setup --yes`) and exits 0.
 
-**Fallback while no release exists.** If the release download returns 404 (no GitHub Release has been cut yet), the release has no build for your platform, or you are on musl libc, the installer does not give up and does not touch your system Node or npm: it downloads the official Node 22 `tar.gz` from nodejs.org (verified against its `SHASUMS256.txt`) into the new version directory, runs that Node's own npm with `install -g --prefix <version dir>/npm` of `consensus-panel` (or, while that is unpublished, the repo tarball), writes the same launcher, and continues with step 5. The receipt records `"channel": "npm-fallback"`. On musl it uses your own Node 22+ instead, since official Node builds need glibc.
+**Fallback while no release exists.** If the release download returns 404 (no GitHub Release has been cut yet), the release has no build for your platform, or you are on musl libc, the installer does not give up and does not touch your system Node or npm: it downloads the official Node 22 `tar.gz` from nodejs.org (verified against its `SHASUMS256.txt`) into the new version directory, runs that Node's own npm with `install -g --prefix <version dir>/npm` of `consensus-panel`, writes the same launcher, and continues with step 5. The receipt records `"channel": "npm-fallback"`. On musl it uses your own Node 22+ instead, since official Node builds need glibc.
 
 ## What gets written, and where
 
@@ -249,7 +248,7 @@ The installers never run `npm install -g` into a system prefix and never change 
 A global install that hits `EACCES` means npm's prefix is root-owned (common with a `/usr/local` Node or a system package). **Do not use `sudo npm install -g`** — it leaves root-owned files in your cache and home directory. Use a user prefix instead:
 
 ```bash
-npm install -g --prefix "$HOME/.local" https://github.com/seanheiney/consensus/archive/refs/heads/main.tar.gz
+npm install -g --prefix "$HOME/.local" consensus-panel
 export PATH="$HOME/.local/bin:$PATH"     # add this to ~/.zshrc or ~/.bashrc
 ```
 
@@ -363,7 +362,7 @@ Project-level files (`.mcp.json`, `.cursor/`, `.claude/`, `.agents/`, the blocks
 | `could not download …` (exit 3) | No network, a proxy, or a firewall blocking GitHub. | Check `HTTPS_PROXY`, see [Proxies and firewalls](#proxies-and-firewalls), or use `CONSENSUS_DOWNLOAD_BASE` with an internal mirror. |
 | `warning: no consensus release is published yet; falling back to a private Node + npm install` | No GitHub Release with archives exists for the requested version yet. | Nothing to do: the fallback installs the same CLI with a private Node under `~/.consensus` and never touches your Node or npm. It needs `nodejs.org`, `registry.npmjs.org` and `codeload.github.com`. |
 | `No interactive terminal, so setup was not started` | The installer ran without a usable terminal (docker without `-t`, CI, `ssh host 'curl … \| sh'`). | Run `consensus setup` in a terminal, or `consensus setup --yes` unattended. |
-| `npm ERR! 404 Not Found - GET https://registry.npmjs.org/consensus-panel` | npm channel only: the package is not published yet. | Use the one-line installer, or `npm install -g https://github.com/seanheiney/consensus/archive/refs/heads/main.tar.gz`. Do **not** use `npm i -g github:seanheiney/consensus` — that shorthand is broken here. |
+| `npm ERR! 404 Not Found - GET https://registry.npmjs.org/consensus-panel` | A registry mirror or proxy that has not synced the package yet, or a typo in the name. | Check `npm config get registry`, or use the one-line installer. Do **not** use `npm i -g github:seanheiney/consensus`: that shorthand is broken for this repo. |
 | `Need at least 2 connected models, found 1` (or `found 0`) | A panel needs two seats and only one vendor is reachable. | `consensus doctor` shows what is missing. Fastest fix: one `OPENROUTER_API_KEY` seats every vendor (`consensus connect openrouter`). Otherwise `consensus connect <vendor>`, or use a single-vendor panel: `consensus profile create claude-family --preset claude-family`, or personas on one model (`--preset perspectives`). |
 | `pre-flight found seats that cannot run: …` | A seat's route was checked before spending anything and cannot work: the CLI is missing, not logged in, or too old for that model. | Each line names the fix. Do that, or change the panel (`--panel`, `--profile`), or re-seat the profile with `consensus profile refresh`. `--force` runs anyway and drops those seats; the run then exits with code 2. |
 | `gemini produced no answer … IneligibleTierError` / "Google login file found but that tier no longer serves the CLI" | Google retired the free individual login for Gemini CLI. A login file on disk is no longer a working connection. | Set an API key: `consensus connect google` (or export `GEMINI_API_KEY`). Alternatively route Gemini through OpenRouter (`openrouter:google/gemini-3.1-pro-preview`). |
