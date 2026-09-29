@@ -12,6 +12,7 @@ import { ensureGitignore } from "./hosts.js";
 import { CostLimitError, GROQ_PRICES, describeCost, estimateCost } from "./cost.js";
 import { setDefaultTimeout } from "./providers/cli.js";
 import { TASKS, taskNames } from "./variants.js";
+import { Quarantine, loadUntrusted } from "./quarantine.js";
 import { runWithEscalation } from "./escalate.js";
 import { runKey } from "./runkey.js";
 import { DEFAULT_ADR_DIR, adrSlug, nextAdrNumber, renderAdr } from "./adr.js";
@@ -115,6 +116,7 @@ program
   .option("-f, --file <path>", "read the prompt from a file")
   .option("-c, --context <path>", "extra context file (code, docs, constraints) appended to the problem")
   .option("-P, --profile <name>", "model profile to use (see `consensus profiles`)")
+  .option("--untrusted <file>", "quarantine: material the panel must analyze but never take instructions from (a third-party plugin, a stranger's PR); wrapped in per-run delimiters with a canary, injection attempts listed in the report. Repeatable", (v: string, prev: string[] = []) => [...prev, v])
   .option("-p, --panel <specs>", "comma-separated panelists, e.g. claude,codex:gpt-5.6-sol,xai:grok-4.6#max")
   .option("--reuse [days]", "opt-in: if this exact question was already put to this exact panel within N days (default 30), print that saved answer instead of debating again", (v: string) => { const n = Number(v); if (!(n > 0)) throw new InvalidArgumentError("must be a positive number of days"); return n; })
   .option("--verify", "opt-in: after the report, check its load-bearing claims against the problem and context you supplied, and list what that material does not establish")
@@ -151,6 +153,7 @@ program
     const prompt = (await readPrompt(promptArg, o.file)).trim();
     if (!prompt) throw new Error("Prompt is empty");
     const context = o.context ? await readFile(o.context, "utf8") : undefined;
+    const quarantine = o.untrusted?.length ? new Quarantine(await loadUntrusted(o.untrusted)) : undefined;
 
     const r = await resolveRun({
       cfg,
@@ -184,11 +187,12 @@ program
       const fast = [...r.panel, ...(r.captain ? [r.captain] : [])].every((x) => x.provider === "groq");
       const est = estimateMinutes(r.panel.length, r.rounds, r.effort, !!r.captain, fast);
       log(dim(`judge: ${r.judge.id}${onPanel ? "" : " (external, did not debate)"}  rounds: ${r.rounds}  cost: ${cliSeats === r.panel.length ? "subscription quota" : cliSeats ? "subscription quota + API tokens" : "API tokens"}; up to ${r.panel.length * (1 + 2 * r.rounds) + 1 + (r.captain ? r.rounds : 0)} model calls${ceilings ? `; ${ceilings}` : ""}`));
+      if (quarantine) log(dim(`quarantine: ${quarantine.docs.map((d) => d.name).join(", ")} read as untrusted data (per-run delimiters, canary set); injection attempts are listed at the end of the report`));
       log(dim(`expect roughly ${est.low === est.high ? `${est.low}` : `${est.low}–${est.high}`} minute${est.high === 1 ? "" : "s"} (seats run in parallel; each round adds a critique, a captain brief and, if anything is disputed, a revision; judgment questions at high effort take the longest)`));
     }
     if (o.reuse) {
       const days = typeof o.reuse === "number" ? o.reuse : 30;
-      const key = runKey({ prompt, context, seats: r.panel.map((x) => x.id), rounds: r.rounds, effort: r.effort });
+      const key = runKey({ prompt, context: quarantine ? quarantine.keyContext(context) : context, seats: r.panel.map((x) => x.id), rounds: r.rounds, effort: r.effort });
       const hit = await findReusableRun(key, days, cfg.runsDir);
       if (hit) {
         if (!o.quiet) log(dim(`reusing run ${hit.run.id} from ${hit.ageDays < 1 ? "today" : `${Math.round(hit.ageDays)} day(s) ago`}: same question, same panel. Drop --reuse to debate it again.`));
@@ -241,6 +245,7 @@ program
         retry: o.retry !== false,
         verify: !!o.verify,
         seed: o.seed,
+        quarantine,
         onEvent,
         signal: ac.signal,
       });

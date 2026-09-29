@@ -250,6 +250,8 @@ export interface ConsensusRun {
   profile?: string;
   /** The file the context was read from (`-c <file>`), so a recheck can re-read it when the saved run is gone. */
   contextFile?: string;
+  /** Quarantine mode (--untrusted): nonce, canary, the files read, injection attempts the seats reported, and compromised seats. */
+  quarantine?: import("./quarantine.js").QuarantineRecord;
 }
 
 export type ConsensusEvent =
@@ -294,4 +296,6 @@ export interface ConsensusOptions {
   seed?: number;
   onEvent?: (e: ConsensusEvent) => void;
   signal?: AbortSignal;
+  /** Quarantine mode: untrusted material wrapped in per-run delimiters, with a canary (see quarantine.ts). */
+  quarantine?: import("./quarantine.js").Quarantine;
 }
