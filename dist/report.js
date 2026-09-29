@@ -1,4 +1,6 @@
 import { describeIsolation, isolationSummary } from "./providers/isolation.js";
+import { cleanRooms } from "./providers/cleanroom.js";
+import { renderQuarantine } from "./quarantine.js";
 function fmt(n) {
     return n.toLocaleString("en-US");
 }
@@ -54,11 +56,17 @@ export function renderReport(run, opts = {}) {
         lines.push("", `_Escalated: a faster panel (${run.escalation.fromSeats.join(", ")}) answered first and ${run.escalation.reason}; this panel re-answered with that draft in hand. First pass: run ${run.escalation.fromRunId}._`);
     }
     const iso = isolationSummary(run.isolation);
+    // Older runs have no cleanRooms field; derive it from their receipts.
+    const trust = run.cleanRooms ?? cleanRooms(run.isolation);
+    if (trust)
+        lines.push("", `**${trust.line}**`);
     if (iso) {
         lines.push("", `_${iso}_`);
         for (const [id, s] of Object.entries(run.isolation))
             lines.push(`- ${describeIsolation(id, s)}`);
     }
+    if (run.quarantine)
+        lines.push(...renderQuarantine(run.quarantine, run.labels));
     if (opts.transcript)
         lines.push("", renderTranscript(run));
     return lines.join("\n");

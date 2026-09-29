@@ -5,6 +5,7 @@
  * greppable two years later.
  */
 import { readdir } from "node:fs/promises";
+import { adrMarker } from "./drift.js";
 export const DEFAULT_ADR_DIR = "docs/decisions";
 function section(synthesis, name) {
     return synthesis.match(new RegExp(`^#+\\s*${name}\\s*\\n([\\s\\S]*?)(?=\\n#|$)`, "im"))?.[1]?.trim() || undefined;
@@ -68,6 +69,8 @@ export function renderAdr(run, o) {
         const unsupported = run.verification.claims.filter((c) => c.support !== "supported");
         lines.push("## Grounding check", "", `${run.verification.claims.length} load-bearing claim${run.verification.claims.length === 1 ? "" : "s"} were checked against the material the panel was given.`, ...(unsupported.length ? ["", "Not established by that material:", ...unsupported.map((c) => `- **${c.support}**: ${c.claim}`)] : ["", "All of them were established by it."]), "");
     }
-    lines.push("## The panel", "", ...seats.map((s) => `- ${s}`), ...(run.captain ? [`- Captain: ${run.captain}`] : []), `- Report written by: ${run.judge}`, "", "## Provenance", "", `- Run \`${run.id}\`${o.runDir ? ` — full debate in \`${o.runDir}/debate.md\`` : ""}`, ...(run.escalation ? [`- Escalated from ${run.escalation.fromSeats.join(", ")} (${run.escalation.reason}); first pass \`${run.escalation.fromRunId}\``] : []), ...(run.cost ? [`- Cost: ${run.cost.summary}`] : []), `- Replay: \`consensus log ${run.id}\``, "", "_A panel converging means every seat accepted every other seat's answer, which is agreement, not proof. Treat this record as a well-argued recommendation, not a verified fact._", "");
+    lines.push("## The panel", "", ...seats.map((s) => `- ${s}`), ...(run.captain ? [`- Captain: ${run.captain}`] : []), `- Report written by: ${run.judge}`, "", "## Provenance", "", `- Run \`${run.id}\`${o.runDir ? ` — full debate in \`${o.runDir}/debate.md\`` : ""}`, ...(run.escalation ? [`- Escalated from ${run.escalation.fromSeats.join(", ")} (${run.escalation.reason}); first pass \`${run.escalation.fromRunId}\``] : []), ...(run.cost ? [`- Cost: ${run.cost.summary}`] : []), `- Replay: \`consensus log ${run.id}\``, "", "_A panel converging means every seat accepted every other seat's answer, which is agreement, not proof. Treat this record as a well-argued recommendation, not a verified fact._", "", 
+    // Read back by `consensus adr --recheck`; invisible when rendered.
+    adrMarker(run), "");
     return lines.join("\n");
 }

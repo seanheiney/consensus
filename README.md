@@ -110,6 +110,22 @@ consensus adr                                                          # write t
 - **`--reuse`** hands back the saved answer when the same question already went to the same panel.
 - **`consensus adr`** writes the decision, its confidence, its dissents and how to replay the debate into your repo. In CI, the [GitHub Action](docs/ci.md) puts the same thing on a pull request.
 
+## Trust you can check
+
+```bash
+consensus check "Is this migration safe to run online?" -c 0042.sql   # one answer per model, no debate; exit 1 when they split
+consensus -P plugin-review --untrusted SKILL.md "Is this plugin safe to install?"   # read it as data, list injection attempts
+consensus outcome latest right          # later: record how the decision turned out
+consensus calibration                   # does "high confidence" actually mean right more often?
+consensus adr --recheck --all           # re-ask recorded decisions with today's models; exit 1 if one changed
+```
+
+- **`consensus check`** uses disagreement between models as an uncertainty signal: seconds, one call per seat, and a `Needs human: yes|no` you can gate CI or an agent on.
+- **Quarantine (`--untrusted`)** puts third-party plugins, skills, READMEs or PRs inside per-run delimiters with a canary token. Seats report the injection attempts they find, and any seat that leaks the canary is excluded ([docs/quarantine.md](docs/quarantine.md); `plugin-review` pack via `consensus pack add ./packs/plugin-review.json`).
+- **Calibration**: `consensus outcome` and `consensus calibration` score the panel's stated confidence against what actually happened, and say when there is too little data to tell.
+- **Decision drift**: `consensus adr --recheck` appends a dated verdict (unchanged, refined, changed) to each record without touching the original ([docs/decisions.md](docs/decisions.md)).
+- **Clean rooms, observed**: every run ends with a trust line such as `Clean rooms: 3/3 seats observed clean`, separating isolation the CLI reported from isolation that is only configured ([docs/isolation.md](docs/isolation.md)).
+
 ## Use it from Claude Code, Codex, Cursor…
 
 After `setup`, your agent has a `consensus` MCP tool plus a skill telling it when to use it. Just ask: *"Get a panel consensus on whether we should migrate this queue to Kafka; include the producer code."*

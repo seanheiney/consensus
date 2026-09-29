@@ -69,28 +69,54 @@ export function receiptFlags(args, valueFlags) {
 }
 /** Tools a clean seat may legitimately report: Claude Code's structured-output tool exists only to return the JSON answer. */
 const BENIGN_TOOLS = new Set(["StructuredOutput"]);
-/** Plugins that ship inside the CLI itself (Claude Code reports e.g. "telemetry@builtin"); installed plugins make a seat not clean. */
-const isBuiltin = (plugin) => plugin.endsWith("@builtin");
+/**
+ * Plugins and skills that ship inside the CLI itself (Claude Code reports e.g. "telemetry@builtin", grok
+ * "<skill>@bundled"); installed ones make a seat not clean. Each suffix is honoured only in its own list,
+ * so a plugin named "x@bundled" is still an installed plugin.
+ */
+const isBuiltinPlugin = (name) => name.endsWith("@builtin");
+const isBundledSkill = (name) => name.endsWith("@bundled");
 /** Fold one call's receipt into a seat's running record. */
 export function foldIsolation(prev, r) {
     const union = (a, b) => (a || b ? [...new Set([...(a ?? []), ...(b ?? [])])].sort() : undefined);
     const tools = union(prev?.tools, r.tools);
     const mcpServers = union(prev?.mcpServers, r.mcpServers);
     const plugins = union(prev?.plugins, r.plugins);
-    const clean = (prev?.clean ?? true) && !(r.tools ?? []).some((t) => !BENIGN_TOOLS.has(t)) && !(r.mcpServers ?? []).length && !(r.plugins ?? []).some((p) => !isBuiltin(p));
+    const skills = union(prev?.skills, r.skills);
+    const hooks = union(prev?.hooks, r.hooks);
+    const instructions = union(prev?.instructions, r.instructions);
+    const other = union(prev?.other, r.other);
+    const clean = (prev?.clean ?? true) &&
+        !(r.tools ?? []).some((t) => !BENIGN_TOOLS.has(t)) &&
+        !(r.mcpServers ?? []).length &&
+        !(r.plugins ?? []).some((p) => !isBuiltinPlugin(p)) &&
+        !(r.skills ?? []).some((p) => !isBundledSkill(p)) &&
+        !(r.hooks ?? []).length &&
+        !(r.instructions ?? []).length &&
+        !(r.other ?? []).length;
     // Evidence is only as strong as the weakest call.
     const rank = { observed: 2, configured: 1, request: 1 };
     const evidence = prev && rank[prev.evidence] < rank[r.evidence] ? prev.evidence : r.evidence;
-    return { ...prev, ...r, evidence, tools, mcpServers, plugins, calls: (prev?.calls ?? 0) + 1, clean };
+    return { ...prev, ...r, evidence, tools, mcpServers, plugins, skills, hooks, instructions, other, calls: (prev?.calls ?? 0) + 1, clean };
 }
 /** One line per seat for reports and the MCP summary. */
 export function describeIsolation(id, s) {
     if (s.route === "api")
         return `${id}: API request with no tools attached (${s.calls} call${s.calls === 1 ? "" : "s"})`;
-    const builtins = s.plugins?.filter(isBuiltin).map((p) => p.replace(/@builtin$/, ""));
-    const installed = s.plugins?.filter((p) => !isBuiltin(p));
+    const builtins = [...(s.plugins ?? []).filter(isBuiltinPlugin), ...(s.skills ?? []).filter(isBundledSkill)].map((p) => p.replace(/@(builtin|bundled)$/, ""));
+    const installed = s.plugins?.filter((p) => !isBuiltinPlugin(p));
+    // Grok's inspect report covers skills, hooks and instruction files but not tools (those are off by --tools "").
+    const extra = [
+        s.skills && `skills ${list(s.skills.filter((p) => !isBundledSkill(p)))}`,
+        s.hooks && `hooks ${list(s.hooks)}`,
+        s.instructions && `instruction files ${list(s.instructions)}`,
+        s.other?.length && `other add-ons ${list(s.other)}`,
+    ]
+        .filter(Boolean)
+        .map((x) => `, ${x}`)
+        .join("");
     const seen = s.evidence === "observed"
-        ? `observed at startup: tools ${list(s.tools?.filter((t) => !BENIGN_TOOLS.has(t)))}, MCP servers ${list(s.mcpServers)}, plugins ${list(installed)}${builtins?.length ? ` (CLI built-ins: ${builtins.join(", ")})` : ""}`
+        ? `observed ${s.observedVia ? `via ${s.observedVia}` : "at startup"}: tools ${s.tools ? list(s.tools.filter((t) => !BENIGN_TOOLS.has(t))) : "off by flag"}, MCP servers ${list(s.mcpServers)}, plugins ${list(installed)}${extra}${builtins.length ? ` (CLI built-ins: ${builtins.join(", ")})` : ""}`
         : "flags only (this CLI does not report its tool list)";
     const env = s.envPassed ? `, ${s.envPassed.length} env vars passed / ${s.envDropped ?? 0} withheld` : "";
     return `${id}: ${s.clean ? "clean" : "NOT CLEAN"}, ${seen}${env}, fresh empty temp dir${s.version ? `, ${s.bin} ${s.version}` : ""} (${s.calls} call${s.calls === 1 ? "" : "s"})`;
@@ -103,7 +129,7 @@ export function isolationSummary(isolation) {
     const dirty = seats.filter(([, s]) => !s.clean).map(([id]) => id);
     const count = (e) => seats.filter(([, s]) => s.evidence === e).length;
     const how = [
-        count("observed") && `${count("observed")} observed at startup with no tools or MCP servers`,
+        count("observed") && `${count("observed")} observed (the CLI reported what it loaded)`,
         count("configured") && `${count("configured")} by lockdown flags (CLI does not report its tools)`,
         count("request") && `${count("request")} API with no tools attached`,
     ].filter(Boolean).join("; ");

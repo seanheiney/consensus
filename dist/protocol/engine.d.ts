@@ -37,6 +37,14 @@ export declare class ConsensusEngine {
     private isolation;
     private completeFor;
     private callWith;
+    /** Quarantine: per-seat injection lists, accumulated over the seat's answers. */
+    private injections;
+    /** Participants whose output contained the canary; every later call they would make fails. */
+    private tainted;
+    /** Quarantine: strip the seat's `injections` block from its answer and keep the list. */
+    private screen;
+    /** Quarantine: the canary showed up in this participant's output. Seats are dropped, so their vote never reaches the synthesis. */
+    private compromise;
     /** Call, parse JSON, validate; on failure ask the model once to repair. */
     private callJson;
 }
