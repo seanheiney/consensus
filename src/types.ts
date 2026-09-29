@@ -222,8 +222,10 @@ export interface ConsensusRun {
   verification?: Verification;
   /** Set when a cheaper panel answered first and this run was promoted from it (opt-in --escalate). */
   escalation?: { fromRunId: string; fromSeats: string[]; reason: string; firstPassConverged: boolean };
-  /** Profile the panel came from, when one was used; `consensus calibration` groups outcomes by it. */
+  /** The profile the panel came from, when it came from one; `consensus calibration` groups outcomes by it and `consensus adr --recheck` seats it again. */
   profile?: string;
+  /** The file the context was read from (`-c <file>`), so a recheck can re-read it when the saved run is gone. */
+  contextFile?: string;
 }
 
 export type ConsensusEvent =

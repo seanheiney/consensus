@@ -6,6 +6,7 @@
  */
 import { readdir } from "node:fs/promises";
 import type { ConsensusRun } from "./types.js";
+import { adrMarker } from "./drift.js";
 
 export const DEFAULT_ADR_DIR = "docs/decisions";
 
@@ -106,6 +107,9 @@ export function renderAdr(run: ConsensusRun, o: AdrOptions): string {
     `- Replay: \`consensus log ${run.id}\``,
     "",
     "_A panel converging means every seat accepted every other seat's answer, which is agreement, not proof. Treat this record as a well-argued recommendation, not a verified fact._",
+    "",
+    // Read back by `consensus adr --recheck`; invisible when rendered.
+    adrMarker(run),
     "",
   );
   return lines.join("\n");
