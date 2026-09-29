@@ -1,5 +1,5 @@
 /** Connection status of each vendor: CLI installed / logged in, API key present, live probe. */
-import { existsSync } from "node:fs";
+import { accessSync, constants, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { runCommand } from "./providers/cli.js";
@@ -61,6 +61,11 @@ export async function cliStatus(name: string, env: NodeJS.ProcessEnv = process.e
         const r = await runCommand(bin, ["models"], { timeoutMs: 15000 });
         const out = r.stdout + r.stderr;
         const ok = !/not authenticated|not signed in/i.test(out) && r.code === 0;
+        if (!ok && !env.XAI_API_KEY) {
+          // A login written by `sudo grok` leaves auth.json owned by root: grok then says "not signed in".
+          const auth = join(homedir(), ".grok", "auth.json");
+          if (existsSync(auth) && !readable(auth)) return { ...base, detail: `not logged in: ${auth} is not readable by you (written by sudo?); run \`sudo chown "$USER" ${auth}\`` };
+        }
         return { ...base, loggedIn: ok || !!env.XAI_API_KEY, detail: ok ? "logged in" : env.XAI_API_KEY ? "using XAI_API_KEY" : "not logged in: run `grok login`" };
       }
       default:
@@ -68,6 +73,15 @@ export async function cliStatus(name: string, env: NodeJS.ProcessEnv = process.e
     }
   } catch (err) {
     return { ...base, detail: `check failed: ${(err as Error).message}` };
+  }
+}
+
+function readable(path: string): boolean {
+  try {
+    accessSync(path, constants.R_OK);
+    return true;
+  } catch {
+    return false;
   }
 }
 

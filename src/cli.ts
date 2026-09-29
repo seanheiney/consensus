@@ -514,7 +514,7 @@ profile
   .action(async () => {
     const statuses = await scanVendors(credentialEnv());
     for (const preset of PRESETS) {
-      const prof = materializePreset(preset, statuses);
+      const prof = materializePreset(preset, statuses, credentialEnv());
       log(`${prof ? green(G.ok) : dim(G.no)} ${preset.name.padEnd(14)} ${preset.description}`);
       if (prof) {
         log(dim(`    ${prof.panel.map(memberLabel).join(", ")}  rounds ${prof.rounds}`));
@@ -544,7 +544,7 @@ profile
     if (o.preset) {
       const preset = PRESETS.find((x) => x.name === o.preset);
       if (!preset) throw new Error(`Unknown preset "${o.preset}". Known: ${PRESETS.map((x) => x.name).join(", ")}`);
-      const prof = materializePreset(preset, statuses);
+      const prof = materializePreset(preset, statuses, credentialEnv());
       if (!prof) throw new Error(`Preset "${o.preset}" needs connections you don't have yet (run \`consensus doctor\`).`);
       if (o.edit) {
         p.intro(`profile from preset ${o.preset}`);

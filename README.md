@@ -92,6 +92,24 @@ A subscription-backed seat is that vendor's CLI run headless in an empty temp di
 
 **Read this before relying on subscription seats.** Every seat call spends the same rate limits as your interactive use of that CLI (Claude Code's rolling 5-hour and weekly caps, Codex's ChatGPT limits), and a three-round frontier debate can consume a meaningful slice of a daily cap. Vendors' terms govern this use: Anthropic's published terms restrict third-party products from offering or relying on claude.ai logins without approval. consensus is a local tool you run on your own machine under your own login, not a hosted service, but checking your plan's terms is your responsibility — and you should use API keys for anything shared, automated, or run on someone else's behalf. Keys saved by `setup` are handed only to the matching API client and are never exported into a vendor CLI's environment, so a saved key cannot silently move your subscription CLI onto per-token billing.
 
+## Cheap by choice, expensive only when it earns it
+
+None of this is on by default. A run is exactly the panel you asked for, and these are flags you add.
+
+```bash
+consensus "Optimistic locking or a distributed lock?" --variants 4     # one model, four angles
+consensus "Review this migration" -c plan.sql --for code-review        # the angles that fit the work
+consensus "Is this design sound?" -P groq-fast --escalate frontier     # cheap first, promote only if unsettled
+consensus "Does this schema support our queries?" -c schema.sql --verify   # check claims against what you pasted
+consensus adr                                                          # write the decision into docs/decisions/
+```
+
+- **`--variants` / `--for`** seat the same model several times under different reasoning angles, so a real debate needs one subscription rather than four. With `groq-fast` (Groq's open-weight models, once `GROQ_API_KEY` is set) that is seconds and fractions of a cent.
+- **`--escalate <profile>`** answers with the cheap panel and promotes to the strong one only when the first pass did not converge, left a major dispute open, or reported confidence below high. It never downgrades a run, and the promoted panel gets the first answer as a draft to check.
+- **`--verify`** separates what your pasted material actually establishes from what the panel assumed.
+- **`--reuse`** hands back the saved answer when the same question already went to the same panel.
+- **`consensus adr`** writes the decision, its confidence, its dissents and how to replay the debate into your repo. In CI, the [GitHub Action](docs/ci.md) puts the same thing on a pull request.
+
 ## Use it from Claude Code, Codex, Cursor…
 
 After `setup`, your agent has a `consensus` MCP tool plus a skill telling it when to use it. Just ask: *"Get a panel consensus on whether we should migrate this queue to Kafka; include the producer code."*

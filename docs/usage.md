@@ -87,6 +87,12 @@ Shaping the run:
 | `-j, --judge <spec>` | Who writes the synthesis. Must be a seat on the panel, unless written `external:<spec>`. |
 | `-r, --rounds <n>` | Max critique/revise rounds. `1` means critique only, no revision. |
 | `-e, --effort <level>` | `low\|medium\|high\|max` for seats without their own `#effort`. |
+| `--variants <n>` | Opt-in. Seat the panel's model(s) `n` times, each under a different reasoning angle. One subscription, a real debate. |
+| `--for <task>` | Opt-in. Seat the angles that suit `code-review`, `architecture`, `debug`, `security`, `product` or `estimate` (and set that task's round count). |
+| `--escalate <profile>` | Opt-in. Answer with the chosen panel first; promote to `<profile>` only if that leaves the question unsettled. |
+| `--escalate-when <rule>` | `unsettled` (default), `disputed` or `always`. |
+| `--verify` | Opt-in. After the report, check its load-bearing claims against the problem and context you supplied. |
+| `--reuse [days]` | Opt-in. If this exact question already went to this exact panel within N days (default 30), print that saved answer instead of paying again. |
 | `--max-cost <usd>` | Abort mid-run once the estimated list-price spend crosses this. Unpriced subscription seats are not counted. |
 | `--max-tokens <n>` | Cap output tokens per model call. |
 | `--no-retry` | Do not retry a seat once on a transient failure (429, 529, timeout). |
@@ -102,6 +108,38 @@ Two safety behaviours worth knowing:
 
 - **A bare single word is refused.** `consensus profils` would otherwise start a paid debate, so a short argument with no whitespace is rejected unless you write `consensus run "profils"` explicitly.
 - **Pre-flight runs before anything is spent.** Every seat's route is checked (CLI installed, logged in, key present, model driveable by the installed CLI version) and the run stops with the exact fix if one cannot work.
+
+### Cheap panels, and paying more only when it matters
+
+Nothing below is on by default: a run is exactly the panel you asked for.
+
+```bash
+# A real debate from one subscription: same model, four angles.
+consensus "Optimistic locking or a distributed lock for inventory holds?" --variants 4
+
+# The angles that suit the work, with the task's own round count.
+consensus "Review this migration plan" -c plan.md --for code-review
+
+# Cheap and fast first; only promote to the frontier panel if it stays unsettled.
+consensus "Is this rate-limiter design sound?" -P groq-fast --escalate frontier
+
+# Check the answer against the material you actually supplied.
+consensus "Does this schema support our reporting queries?" -c schema.sql --verify
+```
+
+`--escalate` never downgrades: the panel you named answers first, and the stronger profile runs only when the first pass did not converge, left a major dispute open, reported confidence below high, or lost seats. The promoted panel is handed the first answer as a draft to verify, never as an authority, and the final report says where it came from.
+
+`groq-fast` and `groq-council` (see `consensus profile presets`) seat Groq's open-weight models under different angles. They appear once `GROQ_API_KEY` is set, answer in seconds for fractions of a cent, and are the natural first tier to escalate from. As with every profile the captain is `auto` — the best available model moderates and writes the report, even when the seats are cheap. For an all-cheap run (a benchmark arm, or a hard spend ceiling), pin it: `--captain groq:openai/gpt-oss-120b#high`, or `--captain none`.
+
+### Decisions your repo keeps
+
+```bash
+consensus adr                      # the last run -> docs/decisions/0007-....md
+consensus adr <run-id> --status Accepted
+consensus adr --stdout             # print it instead
+```
+
+The record holds the question, the decision, the confidence, what stayed unresolved, the panel, the grounding check if one ran, and how to replay the debate. Commit it with the change it justifies.
 
 ## Watch a run in progress
 

@@ -397,7 +397,15 @@ async function resolveRunInner(o) {
     }
     const profileName = o.profile ?? cfg.profile;
     if (profileName) {
-        const prof = cfg.profiles?.[profileName];
+        let prof = cfg.profiles?.[profileName];
+        if (!prof) {
+            // A built-in preset by name, materialized from what is connected (CI has no saved config).
+            const { PRESETS } = await import("./catalog.js");
+            const { materializePreset } = await import("./profiles.js");
+            const preset = PRESETS.find((p) => p.name === profileName);
+            if (preset)
+                prof = materializePreset(preset, await scan(), env);
+        }
         if (!prof) {
             const known = Object.keys(cfg.profiles ?? {});
             throw new Error(`Unknown profile "${profileName}". ${known.length ? `Known: ${known.join(", ")}` : "No profiles defined; run `consensus setup` or `consensus profile create`."}`);

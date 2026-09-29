@@ -37,6 +37,15 @@ Preferred: the MCP tool \`consensus\` (server name \`consensus\`). Arguments:
 - \`profile\` (optional): a named model profile, e.g. \`frontier\`, \`balanced\`, \`budget\`, \`perspectives\` (one model seated under several personas). Omit for the user's default; \`consensus_profiles\` lists them.
 - \`panel\` (optional): explicit seats like \`["claude+skeptic", "codex:gpt-5.6-sol", "claude+security"]\` when the user asks for particular models or perspectives.
 - \`rounds\` (optional, default 3) and \`effort\` (optional, low|medium|high|xhigh|max).
+- \`variants\` (optional, 2-8): seat the panel's model(s) that many times under different reasoning angles. Use it when only one vendor is connected, or when the user wants a debate without frontier cost. \`task\` (code-review, architecture, debug, security, product, estimate) picks the angles that suit the work.
+- \`escalate_to\` (optional): a profile to promote to if the first panel leaves the question unsettled. The cheap-first pattern: a fast panel answers, and the expensive one only runs when it did not converge, left a major dispute open, or reported confidence below high.
+- \`verify\` (optional): after the report, check its load-bearing claims against the material you pasted. Use it whenever the panel is reasoning over supplied code or docs — it separates what your context actually shows from what the panel assumed.
+
+None of these are on by default; the panel is whatever the profile says unless you ask for otherwise.
+
+### Cheap and fast
+
+A whole debate can cost fractions of a cent and take seconds: a small open-weight model seated under several angles. If \`consensus_profiles\` lists \`groq-fast\` or \`groq-council\`, prefer them for questions that do not warrant frontier spend, or as the first tier of \`escalate_to\`. Same idea with any model: \`variants: 4\` on the user's own subscription.
 
 Every run has a captain by default: the best available model (preferring one not on the panel) moderates after each critique round, referees disputes it can settle, puts direct questions to seats that are stuck, may grant one extra round, and writes the report; pass \`captain: "none"\` to disable or a spec to choose one.
 
@@ -47,6 +56,10 @@ Fallback if the MCP tool is not available: run the CLI and read stdout.
 \`\`\`bash
 consensus "<problem>" -c context.md            # or: cat problem.md | consensus -
 consensus "<problem>" --profile frontier --rounds 2
+consensus "<problem>" --variants 4             # one model, four angles: cheap debate
+consensus "<problem>" --for code-review -c diff.patch
+consensus "<problem>" -P groq-fast --escalate frontier   # promote only if unsettled
+consensus "<problem>" -c schema.sql --verify   # check claims against what you pasted
 consensus profiles                             # list model profiles
 \`\`\`
 
@@ -61,6 +74,9 @@ consensus profiles                             # list model profiles
 
 - Treat "# Answer" as the recommendation. Check "# Confidence" and "# Unresolved disagreements" before acting: an open disagreement means the panel could not settle it, so surface it to the user rather than picking silently.
 - Tell the user the panel was consulted, its confidence, and any dissent. Do not present a panel answer as your own.
+- When \`verify\` ran, the report lists claims the supplied material does not establish. Those are the panel's assumptions: check them or tell the user about them, do not quietly adopt them.
+- When the run escalated, the report says which panel answered first and why it was promoted.
+- If the decision is one the repo should remember (architecture, schema, migration, a tradeoff someone will re-litigate later), offer to run \`consensus adr\`: it writes the question, decision, confidence, dissents and a replay command to \`docs/decisions/NNNN-*.md\` for the user to commit.
 - Every run is saved under \`.consensus/runs/<id>/\` with \`debate.md\` (the full debate: each answer, every critique and dispute, each concession or rebuttal, the synthesis). If the user wants to dig in, run \`consensus runs\` to list and \`consensus log [id]\` to read one.
 `;
 /** Cursor rule (.mdc): same content, Cursor frontmatter. */
@@ -76,7 +92,7 @@ const END = "<!-- consensus:end -->";
 export const RULES_BLOCK = `${START}
 ## Consensus panel available
 
-A \`consensus\` tool is installed (MCP server \`consensus\`, CLI \`consensus\`). It sends a self-contained problem to a panel of independent frontier models that debate adversarially until they agree, and returns one answer with confidence and unresolved disagreements. Use it for high-stakes or ambiguous decisions (architecture, design, hard tradeoffs, being stuck), or whenever the user asks for consensus, a panel, a second opinion, or "what do the other models think". Put the full problem in \`prompt\` and paste real code/errors/constraints in \`context\`; panelists cannot see files or the conversation. It is slow and costs money: not for routine work. Always report the panel's confidence and any dissent to the user.
+A \`consensus\` tool is installed (MCP server \`consensus\`, CLI \`consensus\`). It sends a self-contained problem to a panel of independent frontier models that debate adversarially until they agree, and returns one answer with confidence and unresolved disagreements. Use it for high-stakes or ambiguous decisions (architecture, design, hard tradeoffs, being stuck), or whenever the user asks for consensus, a panel, a second opinion, or "what do the other models think". Put the full problem in \`prompt\` and paste real code/errors/constraints in \`context\`; panelists cannot see files or the conversation. It is slow and costs money by default: not for routine work — though \`variants\` (one model, several angles) or a \`groq-fast\` profile make a real debate cheap and quick, and \`escalate_to\` spends frontier budget only when the cheap panel cannot settle it. Always report the panel's confidence and any dissent to the user.
 ${END}`;
 /** Insert or replace the marked block in a markdown file, creating the file if needed. */
 export async function upsertBlock(file, block = RULES_BLOCK) {

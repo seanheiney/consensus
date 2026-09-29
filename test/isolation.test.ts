@@ -2,7 +2,7 @@ import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createClaudeCliPanelist } from "../src/providers/cli.js";
+import { createClaudeCliPanelist, createGrokCliPanelist } from "../src/providers/cli.js";
 import { describeIsolation, foldIsolation, isolationSummary, receiptFlags, seatEnv } from "../src/providers/isolation.js";
 import { ConsensusEngine } from "../src/protocol/engine.js";
 import { renderReport } from "../src/report.js";
@@ -142,5 +142,40 @@ describe("engine", () => {
     expect(run.isolation!["openai:m"]).toMatchObject({ route: "api", evidence: "request", clean: true });
     expect(isolationSummary(run.isolation)).toMatch(/^Isolation: 2\/2 seats clean/);
     expect(renderReport(run)).toContain("Isolation: 2/2 seats clean");
+  });
+});
+
+describe("Grok CLI seat (fake binary)", () => {
+  const saved = { ...process.env };
+  afterEach(() => {
+    process.env = { ...saved };
+  });
+
+  it("runs in an empty home holding only the login, and keeps a refreshed token", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "consensus-grok-"));
+    const realHome = join(dir, "real-grok");
+    await import("node:fs/promises").then((fs) => fs.mkdir(realHome, { recursive: true }));
+    await writeFile(join(realHome, "auth.json"), '{"token":"old"}');
+    await writeFile(join(realHome, "Agents.md"), "global instructions that must not reach a seat");
+    const seen = join(dir, "seen.txt");
+    const bin = join(dir, "grok");
+    // Record what the seat could see, then "refresh" the token the way grok would.
+    await writeFile(bin, `#!/bin/sh
+{ echo "HOME=$HOME"; echo "GROK_HOME=$GROK_HOME"; ls -A "$GROK_HOME"; cat "$GROK_HOME/auth.json"; echo; } > "${seen}"
+sleep 0.05; printf '{"token":"new"}' > "$GROK_HOME/auth.json"
+echo '{"result":"pong"}'
+`);
+    await chmod(bin, 0o755);
+    process.env.GROK_HOME = realHome;
+    const r = await createGrokCliPanelist({ bin }).complete({ system: "s", messages: [{ role: "user", content: "ping" }] } as CompletionRequest);
+    expect(r.text).toBe("pong");
+    const log = await readFile(seen, "utf8");
+    expect(log).not.toContain(`HOME=${realHome}`);
+    expect(log).toMatch(/GROK_HOME=.*\/home\/\.grok/);
+    expect(log.split("\n")).toContain("auth.json");
+    expect(log).not.toContain("Agents.md");
+    expect(log).toContain('{"token":"old"}');
+    expect(await readFile(join(realHome, "auth.json"), "utf8")).toBe('{"token":"new"}');
+    expect(r.isolation?.flags).toContain("HOME=<empty sandbox>");
   });
 });

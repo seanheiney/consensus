@@ -269,7 +269,7 @@ export async function runSetup(o: SetupOptions = {}): Promise<void> {
   }
 
   // 2. Profiles ------------------------------------------------------------
-  const starters = starterProfiles(statuses);
+  const starters = starterProfiles(statuses, credentialEnv());
   cfg.profiles ??= {};
   if (Object.keys(starters).length) {
     const add = o.yes ? true : await p.confirm({ message: `Create starter profiles from your connected accounts (${Object.keys(starters).join(", ")})?`, initialValue: true });

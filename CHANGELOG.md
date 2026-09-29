@@ -5,6 +5,13 @@ All notable changes to this project are documented here. The format follows [Kee
 ## [Unreleased]
 
 ### Added
+- `--variants <n>` / MCP `variants`: seat the panel's model(s) once per reasoning angle, so one subscription can hold a real debate. `--for <task>` (code-review, architecture, debug, security, product, estimate) seats the angles that suit a kind of work and its round count. New personas: `enumerator`, `alternate-method`.
+- `--escalate <profile>` / MCP `escalate_to`: answer with the chosen panel first and promote to a stronger profile only when the first pass is unsettled (not converged, a major dispute open, confidence below high, or seats lost). `--escalate-when unsettled|disputed|always`. Opt-in, never downgrades a run; the promoted panel receives the first answer as a draft to verify and the run records where it came from.
+- `--verify` / MCP `verify`: a grounding pass over the final report that marks each load-bearing claim supported, contradicted or unsupported against the problem and context supplied, and only that material.
+- `--reuse [days]`: hand back the saved answer when the same question already went to the same panel (`run.key`).
+- `consensus adr`: write a run up as `docs/decisions/NNNN-slug.md` — question, decision, confidence, unresolved, panel, grounding check, replay command.
+- Presets `groq-fast` and `groq-council`: Groq open-weight models seated under different angles, offered once `GROQ_API_KEY` is set. Presets can now name their seats outright (`shape: "explicit"`). `--profile <preset>` falls back to a built-in preset of that name when no saved profile has it, so CI needs no config file.
+- A GitHub Action (`action.yml`) and [docs/ci.md](docs/ci.md): panel review on a pull request, escalation in CI, `/consensus` comments, with `max-cost` defaulted and API-key seats only.
 - Isolation receipts: every seat call reports how it was isolated, and runs record them per seat (`run.json` `isolation`, the report, the MCP summary). Claude seats are observed: Claude Code's startup event lists the tools, MCP servers and plugins it loaded, and anything beyond structured output and its own built-ins marks the seat not clean. Codex, Gemini and Grok record their lockdown flags; API seats attach no tools.
 - `consensus doctor --isolation`: one tiny live call per subscription seat, printing its receipt, flags and withheld environment; exits 1 if a seat is not clean or could not be checked.
 - `.github/dependabot.yml` for GitHub Actions and npm.
@@ -12,6 +19,8 @@ All notable changes to this project are documented here. The format follows [Kee
 ### Changed
 - Subscription seats get an allow-listed environment instead of inheriting the parent's: other vendors' keys, `GITHUB_TOKEN`, `SSH_AUTH_SOCK` and a host agent's session variables (`CLAUDECODE`, `CLAUDE_CODE_SESSION_ID`, messaging socket) no longer reach a seat. `CONSENSUS_SEAT_ENV="A,B"` passes extra names.
 - Claude seats run with `--output-format stream-json --verbose` so the startup event can be read.
+- Grok seats run with an empty `HOME` and `GROK_HOME` holding only a copy of the login. Before, a grok seat loaded the user's global `~/.grok/Agents.md`, skills, plugins (with hooks), MCP servers (including `consensus` itself), and the hooks, skills and permissions it imports from `~/.claude`. A token refreshed during the call is copied back.
+- `consensus doctor` explains a grok login that exists but is unreadable (`~/.grok/auth.json` owned by root after `sudo grok login`) instead of reporting plain "not logged in".
 - Codex errors reported through `--json` events (for example a usage limit) are shown in full instead of the first event line.
 - GitHub Actions are pinned to commit SHAs and `ci.yml` defaults to read-only permissions.
 

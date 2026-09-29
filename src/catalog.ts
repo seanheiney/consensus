@@ -65,10 +65,14 @@ export interface Preset {
    * "family": every catalog model of one vendor.
    * "personas": one model (best connected vendor, `tier`) seated once per persona.
    */
-  shape: "per-vendor" | "family" | "personas";
+  shape: "per-vendor" | "family" | "personas" | "explicit";
   tier?: Tier;
   vendor?: CatalogVendor;
   personas?: string[];
+  /** shape "explicit": the exact seats. The captain is always "auto" (the best available model). */
+  specs?: string[];
+  /** shape "explicit": only offered when this environment variable is set. */
+  requiresEnv?: string;
 }
 
 /** Built-in presets. `consensus setup` materializes the ones your connections can satisfy. */
@@ -80,6 +84,30 @@ export const PRESETS: Preset[] = [
   { name: "deep", description: "Frontier models, max effort, up to 5 rounds. For decisions that really matter.", shape: "per-vendor", tier: "frontier", effort: "max", rounds: 5 },
   { name: "perspectives", description: "One frontier model seated five times as first-principles, skeptic, pragmatist, security, and user-advocate.", shape: "personas", tier: "frontier", personas: ["first-principles", "skeptic", "pragmatist", "security", "user-advocate"], effort: "high", rounds: 3 },
   { name: "red-team", description: "Each vendor's standard model, plus a skeptic and a contrarian on the strongest one.", shape: "personas", tier: "standard", personas: ["skeptic", "contrarian"], effort: "high", rounds: 3 },
+  {
+    name: "groq-fast",
+    description: "Three angles on one cheap open-weight model (gpt-oss-120b on Groq). A real debate in seconds for fractions of a cent. Needs GROQ_API_KEY.",
+    shape: "explicit",
+    specs: ["groq:openai/gpt-oss-120b#high+first-principles", "groq:openai/gpt-oss-120b#high+skeptic", "groq:openai/gpt-oss-120b#high+enumerator"],
+    requiresEnv: "GROQ_API_KEY",
+    effort: "high",
+    rounds: 1,
+  },
+  {
+    name: "groq-council",
+    description: "Five angles on Groq's open-weight models, two rounds: the cheap panel to escalate from.",
+    shape: "explicit",
+    specs: [
+      "groq:openai/gpt-oss-120b#high+first-principles",
+      "groq:openai/gpt-oss-120b#high+skeptic",
+      "groq:openai/gpt-oss-120b#high+pragmatist",
+      "groq:openai/gpt-oss-120b#high+enumerator",
+      "groq:openai/gpt-oss-20b#high+alternate-method",
+    ],
+    requiresEnv: "GROQ_API_KEY",
+    effort: "high",
+    rounds: 2,
+  },
   { name: "claude-family", description: "Fable, Opus, Sonnet and Haiku debating each other. Works with only a Claude subscription.", shape: "family", vendor: "anthropic", effort: "high", rounds: 3 },
   { name: "gpt-family", description: "Astra, Sol, Terra and Luna debating each other. Works with only a ChatGPT subscription.", shape: "family", vendor: "openai", effort: "high", rounds: 3 },
   { name: "gemini-family", description: "Gemini Pro, Flash and Flash Lite debating each other.", shape: "family", vendor: "google", effort: "high", rounds: 3 },

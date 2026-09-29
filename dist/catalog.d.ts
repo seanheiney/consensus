@@ -32,10 +32,14 @@ export interface Preset {
      * "family": every catalog model of one vendor.
      * "personas": one model (best connected vendor, `tier`) seated once per persona.
      */
-    shape: "per-vendor" | "family" | "personas";
+    shape: "per-vendor" | "family" | "personas" | "explicit";
     tier?: Tier;
     vendor?: CatalogVendor;
     personas?: string[];
+    /** shape "explicit": the exact seats. The captain is always "auto" (the best available model). */
+    specs?: string[];
+    /** shape "explicit": only offered when this environment variable is set. */
+    requiresEnv?: string;
 }
 /** Built-in presets. `consensus setup` materializes the ones your connections can satisfy. */
 export declare const PRESETS: Preset[];

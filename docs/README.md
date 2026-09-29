@@ -8,6 +8,7 @@ Start at the [project README](../README.md) for what consensus is and the 90-sec
 |---|---|
 | [install.md](install.md) | Every install path with exact commands, what the installer does step by step and what it writes where, Node version handling, npm permissions, proxies, air-gapped installs, upgrading, uninstalling, and a troubleshooting table. |
 | [usage.md](usage.md) | CLI reference organized by task — ask, watch, replay, profiles, personas, packs, bench, MCP, library — plus the `provider[:model][#effort][+persona]` seat grammar, the model-id spelling rule, effort mapping per route, and exit codes. |
+| [ci.md](ci.md) | The GitHub Action: reviewing a pull request with a panel, escalating only when the cheap panel is unsure, answering `/consensus` comments, and why gating on "converged" is not a substitute for tests. |
 | [faq.md](faq.md) | Does it actually help, what it costs, subscriptions and vendor terms, what the clean room blocks, privacy, dropped seats, `agree` with disputes, `--rounds 1`, bringing your own model, sharing panels, CI, and whether there is an API. |
 | [../PACKS.md](../PACKS.md) | Packs: bundling profiles, personas and a bench suite into one shareable JSON file, and publishing yours. |
 

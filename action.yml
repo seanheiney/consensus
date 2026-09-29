@@ -1,0 +1,173 @@
+name: Consensus panel
+description: Put a question to a panel of models that debate it adversarially and return one answer, with confidence and unresolved disagreements.
+branding:
+  icon: users
+  color: purple
+
+inputs:
+  prompt:
+    description: The question, fully self-contained. Panelists cannot see the repo.
+    required: true
+  context:
+    description: Supporting material pasted inline (code, diff, constraints).
+    required: false
+  context-file:
+    description: File whose contents are used as the context (appended after `context`).
+    required: false
+  profile:
+    description: Named profile from the repo's consensus.config.json.
+    required: false
+  panel:
+    description: 'Comma-separated seats, e.g. "groq:openai/gpt-oss-120b,anthropic:claude-opus-5".'
+    required: false
+  variants:
+    description: Seat the panel's model(s) this many times, each under a different reasoning angle.
+    required: false
+  for:
+    description: Task preset - code-review, architecture, debug, security, product, estimate.
+    required: false
+  rounds:
+    description: Maximum critique/revise rounds.
+    required: false
+  effort:
+    description: low | medium | high | xhigh | max
+    required: false
+  verify:
+    description: 'Check the report''s load-bearing claims against the context supplied ("true").'
+    required: false
+    default: "false"
+  escalate:
+    description: Profile to promote to when the first panel leaves the question unsettled.
+    required: false
+  escalate-when:
+    description: unsettled (default) | disputed | always
+    required: false
+  max-cost:
+    description: Abort once spend billed to API keys exceeds this many USD. Strongly recommended in CI.
+    required: false
+    default: "2"
+  timeout-minutes:
+    description: Kill any single model call after this many minutes.
+    required: false
+    default: "10"
+  comment:
+    description: 'Post the answer as a comment on the pull request ("true"). Needs github-token and pull-requests: write.'
+    required: false
+    default: "false"
+  github-token:
+    description: Token used to post the comment.
+    required: false
+    default: ${{ github.token }}
+  node-version:
+    description: Node.js version used to run the CLI.
+    required: false
+    default: "22"
+
+outputs:
+  answer:
+    description: The panel's answer section.
+    value: ${{ steps.run.outputs.answer }}
+  converged:
+    description: "true when every seat accepted every other seat's answer."
+    value: ${{ steps.run.outputs.converged }}
+  run-id:
+    description: Id of the saved run.
+    value: ${{ steps.run.outputs.run-id }}
+  report:
+    description: Path to the full markdown report.
+    value: ${{ steps.run.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - id: run
+      shell: bash
+      env:
+        IN_PROMPT: ${{ inputs.prompt }}
+        IN_CONTEXT: ${{ inputs.context }}
+        IN_CONTEXT_FILE: ${{ inputs.context-file }}
+        IN_PROFILE: ${{ inputs.profile }}
+        IN_PANEL: ${{ inputs.panel }}
+        IN_VARIANTS: ${{ inputs.variants }}
+        IN_FOR: ${{ inputs.for }}
+        IN_ROUNDS: ${{ inputs.rounds }}
+        IN_EFFORT: ${{ inputs.effort }}
+        IN_VERIFY: ${{ inputs.verify }}
+        IN_ESCALATE: ${{ inputs.escalate }}
+        IN_ESCALATE_WHEN: ${{ inputs.escalate-when }}
+        IN_MAX_COST: ${{ inputs.max-cost }}
+        IN_TIMEOUT: ${{ inputs.timeout-minutes }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        # Subscription seats (claude/codex/gemini/grok CLIs) cannot run here: CI has no
+        # vendor login, and the vendors' terms cover interactive use. Use API keys:
+        # ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, XAI_API_KEY, GROQ_API_KEY,
+        # OPENROUTER_API_KEY - passed through as ordinary env vars by the calling workflow.
+        out="${RUNNER_TEMP:-/tmp}/consensus-run.json"
+        args=(run "$IN_PROMPT" --json -o "$out" --no-save --quiet --max-cost "$IN_MAX_COST" --timeout "$IN_TIMEOUT")
+        ctx="$IN_CONTEXT"
+        if [ -n "$IN_CONTEXT_FILE" ]; then ctx="$ctx
+        $(cat "$IN_CONTEXT_FILE")"; fi
+        if [ -n "${ctx// /}" ]; then
+          ctxfile="${RUNNER_TEMP:-/tmp}/consensus-context.md"
+          printf '%s' "$ctx" > "$ctxfile"
+          args+=(--context "$ctxfile")
+        fi
+        # `[ -n "$X" ] && args+=(...)` would abort the step under `set -e` whenever the
+        # input is empty, so each optional input gets a real if.
+        add_if_set() { if [ -n "$2" ]; then args+=("$1" "$2"); fi; }
+        add_if_set --profile "$IN_PROFILE"
+        add_if_set --panel "$IN_PANEL"
+        add_if_set --variants "$IN_VARIANTS"
+        add_if_set --for "$IN_FOR"
+        add_if_set --rounds "$IN_ROUNDS"
+        add_if_set --effort "$IN_EFFORT"
+        add_if_set --escalate "$IN_ESCALATE"
+        add_if_set --escalate-when "$IN_ESCALATE_WHEN"
+        if [ "$IN_VERIFY" = "true" ]; then args+=(--verify); fi
+
+        # Exit 2 means the panel shrank but still answered; keep going and say so in the report.
+        set +e
+        node "$ACTION_PATH/dist/cli.js" "${args[@]}"
+        code=$?
+        set -e
+        if [ "$code" != "0" ] && [ "$code" != "2" ]; then exit "$code"; fi
+
+        report="${RUNNER_TEMP:-/tmp}/consensus-report.md"
+        node --input-type=module -e '
+          import { readFileSync, writeFileSync } from "node:fs";
+          import { appendFileSync } from "node:fs";
+          const { renderReport } = await import(process.env.ACTION_PATH + "/dist/index.js");
+          const run = JSON.parse(readFileSync(process.argv[1], "utf8"));
+          const md = renderReport(run);
+          writeFileSync(process.argv[2], md);
+          const answer = (run.synthesis.match(/^#+\s*Answer\s*\n([\s\S]*?)(?=\n#|$)/im)?.[1] ?? run.synthesis).trim();
+          const out = process.env.GITHUB_OUTPUT;
+          const block = (k, v) => `${k}<<CONSENSUS_EOF\n${v}\nCONSENSUS_EOF\n`;
+          appendFileSync(out, block("answer", answer));
+          appendFileSync(out, `converged=${run.converged}\n`);
+          appendFileSync(out, `run-id=${run.id}\n`);
+          appendFileSync(out, `report=${process.argv[2]}\n`);
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY ?? "/dev/null", md + "\n");
+        ' "$out" "$report"
+
+    - if: inputs.comment == 'true' && github.event.pull_request
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPORT: ${{ steps.run.outputs.report }}
+        PR: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
+      run: |
+        set -euo pipefail
+        {
+          echo "## Consensus panel"
+          echo
+          cat "$REPORT"
+        } > "${RUNNER_TEMP:-/tmp}/consensus-comment.md"
+        gh pr comment "$PR" --repo "$REPO" --body-file "${RUNNER_TEMP:-/tmp}/consensus-comment.md"

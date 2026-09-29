@@ -23,8 +23,13 @@ function bail(v: unknown): asserts v is NonNullable<unknown> {
 }
 
 /** Materialize one preset against the connected vendors; undefined if it can't be satisfied. */
-export function materializePreset(preset: Preset, statuses: VendorStatus[]): Profile | undefined {
+export function materializePreset(preset: Preset, statuses: VendorStatus[], env: NodeJS.ProcessEnv = process.env): Profile | undefined {
   const panel: string[] = [];
+  if (preset.shape === "explicit") {
+    // Seats named outright (a Groq team). Offered only when that key is present.
+    if (preset.requiresEnv && !env[preset.requiresEnv]) return undefined;
+    return { description: preset.description, panel: [...preset.specs!], captain: "auto", rounds: preset.rounds, effort: preset.effort };
+  }
   if (preset.shape === "personas") {
     // Best available vendor in catalog order, at the requested tier.
     let base: string | undefined;
@@ -69,11 +74,11 @@ export function materializePreset(preset: Preset, statuses: VendorStatus[]): Pro
 }
 
 /** Every preset your connections can satisfy. Judges rotate across seats so no vendor is always the judge. */
-export function starterProfiles(statuses: VendorStatus[]): Record<string, Profile> {
+export function starterProfiles(statuses: VendorStatus[], env: NodeJS.ProcessEnv = process.env): Record<string, Profile> {
   const out: Record<string, Profile> = {};
   let i = 0;
   for (const preset of PRESETS) {
-    const prof = materializePreset(preset, statuses);
+    const prof = materializePreset(preset, statuses, env);
     if (!prof) continue;
     // The captain (best available model, neutral when possible) moderates and reports.
     prof.captain = "auto";
