@@ -72,6 +72,12 @@ export interface IsolationReceipt {
   tools?: string[];
   mcpServers?: string[];
   plugins?: string[];
+  /** Observed skills (bundled ones suffixed "@bundled"), hooks, and instruction files (Agents.md and similar), when the CLI reports them. */
+  skills?: string[];
+  hooks?: string[];
+  instructions?: string[];
+  /** How "observed" evidence was gathered when not from the call itself, e.g. "grok inspect --json in an identical sandbox". */
+  observedVia?: string;
   /** Where the CLI took its credentials from, when it says ("none" = subscription login). */
   apiKeySource?: string;
 }
@@ -81,6 +87,20 @@ export interface SeatIsolation extends IsolationReceipt {
   calls: number;
   /** False if any call observed a tool (other than structured output), an MCP server or a plugin. */
   clean: boolean;
+}
+
+/** Which seats were verified clean and which are clean by configuration only. */
+export interface CleanRooms {
+  seats: number;
+  /** The CLI reported what it loaded, and it was nothing that counts against a seat. */
+  observedClean: string[];
+  /** Lockdown flags only: the CLI does not report what it loaded. */
+  configuredOnly: string[];
+  /** API seats: requests sent with no tools attached. */
+  api: string[];
+  notClean: string[];
+  /** e.g. "Clean rooms: 3/3 seats observed clean." */
+  line: string;
 }
 
 /** A model that can sit on the panel. Implemented per provider. */
@@ -216,6 +236,8 @@ export interface ConsensusRun {
   dropped: Record<string, string>; // panelist id -> error
   /** Per-seat isolation evidence (panelist id -> receipt folded over every call, captain and judge included). */
   isolation?: Record<string, SeatIsolation>;
+  /** Run-level trust verdict over `isolation`: observed clean vs configured-only vs not clean (see providers/cleanroom.ts). */
+  cleanRooms?: CleanRooms;
   /** Stable key for (question, context, panel, rounds, effort); used by the opt-in --reuse. */
   key?: string;
   /** Grounding pass over the final report, when --verify asked for one. */

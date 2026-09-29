@@ -13,6 +13,7 @@ import { describeProfile } from "./profiles.js";
 import { ConsensusEngine } from "./protocol/engine.js";
 import { runWithEscalation } from "./escalate.js";
 import { isolationSummary } from "./providers/isolation.js";
+import { cleanRooms } from "./providers/cleanroom.js";
 import { renderReport } from "./report.js";
 import { statusLine } from "./setup.js";
 import { saveRun } from "./store.js";
@@ -158,6 +159,7 @@ export function createMcpServer(): McpServer {
         `Panel: ${seats}.${run.captain ? ` Captain: ${run.captain}.` : ""} ${run.converged ? `Converged after ${run.rounds.length} round(s).` : `Did not fully converge after ${run.rounds.length} round(s).`}${Object.keys(run.dropped).length ? ` Dropped: ${Object.keys(run.dropped).join(", ")}.` : ""}`,
         `Cost: ${describeCost(cost)}.`,
         run.verification ? `Grounding check: ${run.verification.claims.filter((c) => c.support === "supported").length}/${run.verification.claims.length} load-bearing claims are established by the material you supplied; ${run.verification.claims.filter((c) => c.support === "contradicted").length} contradicted. Full list in the report.` : "",
+        (run.cleanRooms ?? cleanRooms(run.isolation))?.line ?? "",
         isolationSummary(run.isolation) ?? "",
         saved ? `Full debate: ${saved}/debate.md  (or \`consensus log ${run.id}\`). Call again with transcript=true for the whole report.` : "",
       ]
